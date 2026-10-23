@@ -1,4 +1,4 @@
-import { Terrain, BIOME_NAMES } from './world/terrain.js';
+import { Terrain, BIOME_NAMES, HOUSE } from './world/terrain.js';
 import { Chunks } from './world/chunks.js';
 import { Controller } from './player/controller.js';
 import { initMenu, playerName, getPic } from './menu.js';
@@ -20,10 +20,10 @@ function launch(cfg, joined) {
   new BABYLON.HemisphericLight('amb', new BABYLON.Vector3(0, 1, 0), scene).intensity = 0.55;
 
   const mat = (c) => { const m = new BABYLON.StandardMaterial('m', scene); m.diffuseColor = c; m.specularColor = BABYLON.Color3.Black(); return m };
-  const hx = 25, hz = -15, hy = terrain.height(hx, hz);
+  const hx = HOUSE.x, hz = HOUSE.z, hy = terrain.height(hx, hz);
   const house = BABYLON.MeshBuilder.CreateBox('house', { width: 8, height: 4, depth: 6 }, scene); house.position.set(hx, hy + 2, hz); house.material = mat(new BABYLON.Color3(.7, .5, .35));
   const roof = BABYLON.MeshBuilder.CreateCylinder('roof', { height: 8, diameter: 6, tessellation: 3 }, scene);
-  roof.rotation.z = Math.PI / 2; roof.position.set(hx, hy + 5, hz); roof.scaling.x = 0.5; roof.material = mat(new BABYLON.Color3(.5, .15, .1));
+  roof.rotation.z = Math.PI / 2; roof.position.set(hx, hy + 4.83, hz); roof.scaling.set(.55, 1.1, 1.3); roof.material = mat(new BABYLON.Color3(.5, .15, .1));
 
   const chunks = new Chunks(scene, terrain, cfg.radius);
   const avatars = new Map(), hud = $('hud');
@@ -31,6 +31,7 @@ function launch(cfg, joined) {
   const handlers = { join: addAv, leave: (id) => { avatars.get(id)?.dispose(); avatars.delete(id) },
     state: (d) => { addAv(d.id); const a = avatars.get(d.id); a.setState(d.p); a.setName(d.n) },
     pic: (id, d) => { addAv(id); avatars.get(id).setPic(d) },
+    where: () => cfg.joinSpawn === 'host' ? [player.cam.position.x, player.cam.position.z] : null, // lets late joiners spawn by the host
     closed: () => { avatars.forEach(a => a.dispose()); avatars.clear(); room = 'Host left the room' } };
   let net = joined, room = '';
   if (joined) { joined.h = handlers; joined.peers.forEach(addAv); room = 'Room joined' }
@@ -38,24 +39,30 @@ function launch(cfg, joined) {
     net = new Net(handlers); net.pics.h = getPic(); const tryHost = (n) => { const code = Math.random().toString(36).slice(2, 7);
       net.host(code, cfg).then(() => room = `Room code: ${code}`).catch(() => n > 0 ? tryHost(n - 1) : room = 'Could not open a room (offline?)') }; tryHost(3);
   }
-  const player = new Controller(scene, canvas, terrain, { x: net && !net.isHost ? 2 * (+net.id.slice(1) || 0) : 0, z: 0 });
+  const at = joined?.at, off = joined ? 2 * (+joined.id.slice(1) || 0) : 0;
+  const player = new Controller(scene, canvas, terrain, { x: (at ? at[0] : 0) + off, z: at ? at[1] : 0 });
+  player.colliders.push({ minX: hx - 4, maxX: hx + 4, minZ: hz - 3, maxZ: hz + 3, top: hy + 6 });
   const saveKey = `mountain:${cfg.seed}:${cfg.length}`;
-  try { const s = JSON.parse(localStorage.getItem(saveKey)); if (s) player.cam.position.set(s.x, s.y + 3, s.z) } catch {}
-  setInterval(() => { const p = player.cam.position; localStorage.setItem(saveKey, JSON.stringify({ x: p.x, y: p.y, z: p.z })) }, 3000);
+  if (!joined) try { const s = JSON.parse(localStorage.getItem(saveKey)); if (s) player.cam.position.set(s.x, s.y + 3, s.z) } catch {}
+  setInterval(() => { if (joined) return; const p = player.cam.position; localStorage.setItem(saveKey, JSON.stringify({ x: p.x, y: p.y, z: p.z })) }, 3000);
 
-  let paused = true; const pause = $('pause');
-  const resume = () => { canvas.requestPointerLock(); pause.style.display = 'none'; paused = false };
+  let paused = false; const pause = $('pause');
+  let lockAt = 0; const resume = () => { lockAt = performance.now(); canvas.requestPointerLock(); pause.style.display = 'none'; paused = false };
   $('resume').onclick = resume; $('quit').onclick = () => location.reload();
-  document.addEventListener('pointerlockchange', () => { if (document.pointerLockElement !== canvas) { paused = true; pause.style.display = 'flex' } });
-  pause.style.display = 'flex'; // first click on Resume locks the mouse
+  document.addEventListener('pointerlockchange', () => { if (document.pointerLockElement !== canvas) { paused = true; player.frozen = false; pause.style.display = 'flex' } });
+  document.addEventListener('pointerlockerror', () => { paused = true; pause.style.display = 'flex' }); // if the browser refuses the lock, fall back to the pause card
+  resume(); // the Start/Join click is the gesture that lets us lock the mouse right away
 
-  let frame = 0, sent = 0, emote = 0; const myName = playerName(); $('hint').style.display = $('stam').style.display = 'block';
+  let frame = 0, sent = 0, emote = 0; const myName = playerName(); $('hint').style.display = $('stam').style.display = $('nav').style.display = 'block';
   const wheel = createWheel(EMOTES, (i) => { emote = i < 0 || emote === i + 1 ? 0 : i + 1 }, (open) => player.frozen = open);
   addEventListener('keydown', (e) => { if (e.code === 'KeyG' && document.pointerLockElement === canvas) wheel.toggle() });
   engine.runRenderLoop(() => {
     const p = player.cam.position;
+    if (!paused && document.pointerLockElement !== canvas && performance.now() - lockAt > 1500) { paused = true; player.frozen = false; pause.style.display = 'flex' } // lock was refused or lost: never sit in a dead state
     if (!paused) player.update(engine.getDeltaTime() / 1000);
     chunks.update(p.x, p.z);
+    const tz = Math.max(p.z - 150, -cfg.length); // arrow points at the trail 150 m further along
+    $('arrow').style.transform = `rotate(${Math.atan2(terrain.pathX(tz) - p.x, tz - p.z) - player.cam.rotation.y}rad)`;
     $('stam').firstChild.style.width = player.stamina + '%'; $('stam').classList.toggle('low', player.exhausted || player.stamina < 25);
     avatars.forEach(a => a.update(engine.getDeltaTime() / 1000));
     if (emote && !EMOTES[emote - 1]?.move && ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space'].some(c => player.keys[c])) emote = 0; // moving cancels an emote

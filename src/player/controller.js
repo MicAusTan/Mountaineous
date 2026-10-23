@@ -2,12 +2,13 @@
 const STEEP = 1.3, CLIMB_MIN = .6;
 export class Controller {
   constructor(scene, canvas, terrain, start) {
-    this.t = terrain; this.keys = {}; this.frozen = false; this.vy = 0; this.grounded = true;
+    this.t = terrain; this.keys = {}; this.frozen = false; this.colliders = []; this.vy = 0; this.grounded = true;
     this.stamina = 100; this.exhausted = false; this.climbing = false; this.grab = false; this.idle = 0;
     this.cam = new BABYLON.UniversalCamera('cam', new BABYLON.Vector3(start.x, terrain.height(start.x, start.z) + 1.7, start.z), scene);
-    this.cam.minZ = 0.1; this.cam.maxZ = 1200; this.cam.inputs.clear(); this.cam.rotation.y = 0; scene.activeCamera = this.cam;
+    this.cam.minZ = 0.1; this.cam.maxZ = 1200; this.cam.inputs.clear(); this.cam.rotation.y = Math.PI; // face the summit (-Z) scene.activeCamera = this.cam;
     addEventListener('keydown', e => this.keys[e.code] = true); addEventListener('keyup', e => this.keys[e.code] = false);
     addEventListener('mousedown', e => { if (e.button === 0 && document.pointerLockElement === canvas && !this.frozen) this.grab = true });
+    addEventListener('blur', () => { this.keys = {}; this.grab = false });
     addEventListener('mouseup', e => { if (e.button === 0) this.grab = false });
     document.addEventListener('pointerlockchange', () => this.grab = false);
     addEventListener('mousemove', e => {
@@ -32,6 +33,13 @@ export class Controller {
     if (!this.climbing && steep) { // too steep to walk up: block uphill steps and slide down
       if (h(nx, nz) > h(p.x, p.z) + 0.001) { nx = p.x; nz = p.z }
       nx -= (gx / grad) * 4 * dt; nz -= (gz / grad) * 4 * dt;
+    }
+    for (const b of this.colliders) if (p.y - 1.7 < b.top) { // solid boxes: push the player out along the shallowest side
+      const r = .4;
+      if (nx > b.minX - r && nx < b.maxX + r && nz > b.minZ - r && nz < b.maxZ + r) {
+        const dl = nx - (b.minX - r), dr = b.maxX + r - nx, df = nz - (b.minZ - r), db = b.maxZ + r - nz, m = Math.min(dl, dr, df, db);
+        if (m === dl) nx = b.minX - r; else if (m === dr) nx = b.maxX + r; else if (m === df) nz = b.minZ - r; else nz = b.maxZ + r;
+      }
     }
     p.x = nx; p.z = nz;
     if (k.Space && this.grounded && !this.climbing && !steep && !this.exhausted && this.stamina >= 12) { this.vy = 6; this.grounded = false; this.stamina -= 12; this.idle = 0 }

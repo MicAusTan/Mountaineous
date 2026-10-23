@@ -2,7 +2,7 @@
 const SIZES = [['Short', 4000], ['Medium', 20000], ['Huge', 100000], ['Endless', 500000]], WALK = 5.5; // m/s
 const $ = (id) => document.getElementById(id);
 const saved = JSON.parse(localStorage.getItem('mountain:settings') || '{}');
-const cfg = { seed: saved.seed || Math.random().toString(36).slice(2, 8), length: saved.length || 20000, grab: saved.grab || 'helpful', radius: saved.radius || 5 };
+const cfg = { seed: saved.seed || Math.random().toString(36).slice(2, 8), length: saved.length || 20000, grab: saved.grab || 'helpful', joinSpawn: saved.joinSpawn || 'base', radius: saved.radius || 5 };
 
 function time(len) { const m = len / WALK / 60; return m < 90 ? `about ${Math.round(m)} min` : `about ${(m / 60).toFixed(m / 60 < 10 ? 1 : 0)} h` }
 export const getPic = () => localStorage.getItem('mountain:pic') || '';
@@ -21,7 +21,7 @@ export function initMenu(onStart, onJoin) {
   picUi();
   $('name').value = localStorage.getItem('mountain:name') || '';
   $('open').checked = saved.open !== false;
-  $('seed').value = cfg.seed; $('grab').value = cfg.grab; $('dist').value = cfg.radius; $('distV').textContent = cfg.radius;
+  $('seed').value = cfg.seed; $('grab').value = cfg.grab; $('spawn').value = cfg.joinSpawn; $('dist').value = cfg.radius; $('distV').textContent = cfg.radius;
   const seg = $('size');
   const paint = () => { [...seg.children].forEach((b, i) => b.classList.toggle('on', SIZES[i][1] === cfg.length)); $('sizeHint').textContent = `${(cfg.length / 1000).toLocaleString()} km long, ${time(cfg.length)} of walking`.replace('km long', 'km long,').replace(',,', ',') };
   SIZES.forEach(([n, v]) => { const b = document.createElement('button'); b.textContent = n; b.onclick = () => { cfg.length = v; paint() }; seg.append(b) });
@@ -34,7 +34,7 @@ export function initMenu(onStart, onJoin) {
   });
   $('joinBtn').onclick = () => { const c = $('code').value.trim().toLowerCase(); if (c) { $('joinMsg').textContent = 'Connecting…'; onJoin(c, (m) => $('joinMsg').textContent = m) } };
   $('go').onclick = () => {
-    Object.assign(cfg, { seed: $('seed').value.trim() || cfg.seed, grab: $('grab').value, radius: +$('dist').value, open: $('open').checked });
+    Object.assign(cfg, { seed: $('seed').value.trim() || cfg.seed, grab: $('grab').value, joinSpawn: $('spawn').value, radius: +$('dist').value, open: $('open').checked });
     localStorage.setItem('mountain:settings', JSON.stringify(cfg)); $('menu').style.display = 'none'; onStart(cfg);
   };
 }

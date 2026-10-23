@@ -1,11 +1,12 @@
 // Pure math: same seed + length => same mountain on every client.
+export const HOUSE = { x: 25, z: -15 }; // the starter house, on a flattened pad
 export function hashSeed(s){let h=2166136261;s=String(s);for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}return h>>>0}
 
 export class Terrain {
   constructor(seed, length = 20000) {
     this.seed = hashSeed(seed); this.length = length; // summit sits at z = -length
     this.peak = length * 0.18;                          // height scales with length
-    this.startFlat = 250;                               // meadow around spawn
+    this.startFlat = 250; this.h0 = this.rawHeight(HOUSE.x, HOUSE.z);                               // meadow around spawn
   }
   rnd(ix, iz, k = 0) { // deterministic hash -> [0,1)
     let h = (Math.imul(ix, 374761393) + Math.imul(iz, 668265263) + Math.imul(this.seed + k, 2147483647)) | 0;
@@ -23,7 +24,11 @@ export class Terrain {
   baseHeight(z) { // gentle ramp after the meadow, steeper near the top
     const t = this.progress(z + this.startFlat * 0.5); return this.peak * (t * 0.6 + t * t * t * 0.4);
   }
-  height(x, z) {
+  height(x, z) { // raw terrain, blended flat around the house so it sits level
+    const r = this.rawHeight(x, z), d = Math.hypot(x - HOUSE.x, z - HOUSE.z); if (d >= 34) return r;
+    const u = Math.max(0, (d - 14) / 20), m = 1 - u * u * (3 - 2 * u); return r + (this.h0 - r) * m;
+  }
+  rawHeight(x, z) {
     const t = this.progress(z), base = this.baseHeight(z);
     const rough = (this.fbm(x / 160, z / 160, 3) - 0.5) * 2 * (20 + 140 * t) * Math.min(1, t * 8)
                 + (this.fbm(x / 30, z / 30, 20) - 0.5) * 6;

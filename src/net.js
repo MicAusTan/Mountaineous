@@ -10,7 +10,7 @@ export class Net {
       this.peer.on('connection', (c) => {
         c.on('open', () => {
           c._id = 'p' + (++this.n); const others = ['h', ...this.conns.keys()];
-          this.conns.set(c._id, c); c.send({ t: 'welcome', id: c._id, cfg: this.cfg, peers: others });
+          this.conns.set(c._id, c); c.send({ t: 'welcome', id: c._id, cfg: this.cfg, peers: others, at: this.h.where?.() ?? null });
           for (const [pid, d] of Object.entries(this.pics)) c.send({ t: 'pic', id: pid, d });
           this.relay({ t: 'join', id: c._id }, c._id); this.h.join(c._id);
         });
@@ -29,7 +29,7 @@ export class Net {
       this.peer.on('open', () => {
         const c = this.up = this.peer.connect(PREFIX + code);
         c.on('data', (d) => {
-          if (d.t === 'welcome') { clearTimeout(t); this.id = d.id; this.peers = d.peers; if (this.myPic) c.send({ t: 'pic', d: this.myPic }); res(d.cfg) }
+          if (d.t === 'welcome') { clearTimeout(t); this.id = d.id; this.peers = d.peers; this.at = d.at; if (this.myPic) c.send({ t: 'pic', d: this.myPic }); res(d.cfg) }
           else if (d.t === 's') this.h.state(d); else if (d.t === 'join') this.h.join(d.id); else if (d.t === 'leave') this.h.leave(d.id); else if (d.t === 'pic') this.h.pic?.(d.id, d.d);
         });
         c.on('close', () => this.h.closed());

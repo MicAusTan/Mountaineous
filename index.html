@@ -10,7 +10,7 @@ html,body{margin:0;height:100%;overflow:hidden;font-family:system-ui,sans-serif;
 #hud{position:fixed;top:12px;left:12px;font-size:14px;line-height:1.5;text-shadow:0 1px 3px #000a;pointer-events:none}
 #hint{display:none;position:fixed;bottom:10px;left:12px;font-size:12px;color:#fff;opacity:.8;text-shadow:0 1px 3px #000a;pointer-events:none}
 .inline button{background:#0f1721;border:1px solid var(--line);border-radius:6px;cursor:pointer;color:var(--ink)}
-#wheel{display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-160px);flex-direction:column;align-items:center;pointer-events:none}
+#wheel{display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-160px);flex-direction:column;align-items:center}
 #wsvg path,#wsvg circle{fill:rgba(24,34,46,.9);stroke:var(--line);stroke-width:1}#wsvg .empty{fill:rgba(24,34,46,.35)}
 #wsvg text{fill:var(--ink);font-family:system-ui,sans-serif}#wsvg g.on path,#wsvg g.on circle{fill:var(--accent)}#wsvg g.on text{fill:#1a1205}
 #wnav{display:flex;gap:14px;align-items:center;margin-top:6px;font-size:13px;text-shadow:0 1px 3px #000a}
@@ -18,6 +18,8 @@ html,body{margin:0;height:100%;overflow:hidden;font-family:system-ui,sans-serif;
 #wcur{display:none;position:fixed;left:0;top:0;width:10px;height:10px;border-radius:50%;background:#fff;border:2px solid #000;pointer-events:none;z-index:5}
 #stam{display:none;position:fixed;bottom:34px;left:50%;transform:translateX(-50%);width:240px;height:10px;background:#0008;border:1px solid #fff4;border-radius:6px;overflow:hidden;pointer-events:none}
 #stam i{display:block;height:100%;width:100%;background:var(--accent)}#stam.low i{background:#e0544a}
+#nav{display:none;position:fixed;top:12px;left:50%;transform:translateX(-50%);text-align:center;font-size:12px;text-shadow:0 1px 3px #000a;pointer-events:none}
+#arrow{display:block;font-size:26px;line-height:1;color:var(--accent)}
 .screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:12px;overflow:auto}
 #menu{background:linear-gradient(#26364a,#6d8aa6 55%,#c9b79c)}
 #pause{background:#0007;display:none}
@@ -39,7 +41,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
 button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .hide{display:none}
 </style></head><body>
-<canvas id="c"></canvas><div id="hud"></div><div id="wheel"><svg id="wsvg" viewBox="0 0 320 320" width="320" height="320"></svg><div id="wnav"><button data-page="-1" aria-label="Previous page">&#8249;</button><span id="wpage"></span><button data-page="1" aria-label="Next page">&#8250;</button></div></div><div id="wcur"></div><div id="stam"><i></i></div><div id="hint">G: emotes · hold Left Click on steep ground to grab &amp; climb</div>
+<canvas id="c"></canvas><div id="hud"></div><div id="wheel"><svg id="wsvg" viewBox="0 0 320 320" width="320" height="320"></svg><div id="wnav"><button data-page="-1" aria-label="Previous page">&#8249;</button><span id="wpage"></span><button data-page="1" aria-label="Next page">&#8250;</button></div></div><div id="wcur"></div><div id="nav"><span id="arrow">&#9650;</span><small>trail</small></div><div id="stam"><i></i></div><div id="hint">G: emotes · hold Left Click on steep ground to grab &amp; climb</div>
 <div id="menu" class="screen"><div class="card">
   <h1>Mountain</h1><p class="sub">Walk to the summit. Bring friends.</p>
   <div class="row"><label for="name">Your name</label><div class="inline"><input id="name" maxlength="16" placeholder="Climber" autocomplete="off"><button id="picBtn" type="button" title="Choose an emote picture" aria-label="Choose an emote picture"></button></div><input id="pic" type="file" accept="image/*" hidden><div class="hint"><span id="picHint"></span> <button id="picClear" type="button" hidden style="background:none;border:0;color:var(--accent);cursor:pointer;padding:0;font:inherit">clear</button></div></div>
@@ -47,6 +49,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
   <div id="host">
     <div class="row"><label for="seed">Seed</label><div class="inline"><input id="seed" maxlength="24"><button id="dice" title="Random seed" aria-label="Random seed">&#127922;</button></div></div>
     <div class="row"><label>Mountain size</label><div class="seg" id="size"></div><div class="hint" id="sizeHint"></div></div>
+    <div class="row"><label for="spawn">Late joiners spawn</label><select id="spawn"><option value="base">At the base</option><option value="host">Next to the host</option></select></div>
     <div class="row"><label for="grab">Grabbing</label><select id="grab">
       <option value="helpful">Helpful only (reach out to pull friends)</option>
       <option value="free">Free grab (annoy anyone)</option><option value="off">Off</option></select></div>
