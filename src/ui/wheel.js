@@ -13,8 +13,14 @@ export function createWheel(emotes, onPick, onToggle = () => {}) {
     svg.innerHTML = h + `<g class="slot" data-i="-1"><circle cx="160" cy="160" r="46"/><text x="160" y="165" font-size="13" text-anchor="middle">Stop</text></g>`;
     $('wpage').textContent = `${page + 1} / ${pages}`; $('wnav').style.visibility = pages > 1 ? 'visible' : 'hidden'; hov = null;
   }
+  function pick() { // the cursor roams the whole screen; what it selects comes from its angle around the wheel's center
+    const dx = cx - innerWidth / 2, dy = cy - innerHeight / 2, r = Math.hypot(dx, dy);
+    if (r < 46) return svg.querySelector('[data-i="-1"]');
+    if (r <= 160) { const k = ((Math.round((Math.atan2(dy, dx) + Math.PI / 2) / (Math.PI / 4)) % 8) + 8) % 8; return svg.querySelector(`[data-i="${page * PER + k}"]`) }
+    return document.elementFromPoint(cx, cy)?.closest('[data-page]') ?? null;
+  }
   function hover() {
-    const t = document.elementFromPoint(cx, cy)?.closest('[data-i],[data-page]');
+    const t = pick();
     if (t === hov) return; hov?.classList.remove('on'); hov = t; hov?.classList.add('on');
   }
   const move = () => { cur.style.transform = `translate(${cx - 5}px,${cy - 5}px)`; hover() };
@@ -25,8 +31,8 @@ export function createWheel(emotes, onPick, onToggle = () => {}) {
     toggle() { open ? api.close() : api.open() },
   };
   document.addEventListener('mousemove', (e) => {
-    if (!open) return; const m = (v, c) => Math.max(c - 240, Math.min(c + 240, v));
-    cx = m(cx + e.movementX, innerWidth / 2); cy = m(cy + e.movementY, innerHeight / 2); move();
+    if (!open) return;
+    cx = Math.max(0, Math.min(innerWidth, cx + e.movementX)); cy = Math.max(0, Math.min(innerHeight, cy + e.movementY)); move();
   });
   document.addEventListener('mousedown', (e) => {
     if (!open) return; e.preventDefault(); e.stopPropagation(); if (!hov) return;

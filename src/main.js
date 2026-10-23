@@ -46,11 +46,14 @@ function launch(cfg, joined) {
   if (!joined) try { const s = JSON.parse(localStorage.getItem(saveKey)); if (s) player.cam.position.set(s.x, s.y + 3, s.z) } catch {}
   setInterval(() => { if (joined) return; const p = player.cam.position; localStorage.setItem(saveKey, JSON.stringify({ x: p.x, y: p.y, z: p.z })) }, 3000);
 
-  let paused = false; const pause = $('pause');
-  let lockAt = 0; const resume = () => { lockAt = performance.now(); canvas.requestPointerLock(); pause.style.display = 'none'; paused = false };
+  let paused = true, retryUntil = 0; const pause = $('pause'); // paused until the mouse is locked
+  const lock = () => canvas.requestPointerLock(), resume = () => { retryUntil = performance.now() + 4000; lock() }; // browsers refuse a re-lock for ~1 s after Esc, so keep retrying
   $('resume').onclick = resume; $('quit').onclick = () => location.reload();
-  document.addEventListener('pointerlockchange', () => { if (document.pointerLockElement !== canvas) { paused = true; player.frozen = false; pause.style.display = 'flex' } });
-  document.addEventListener('pointerlockerror', () => { paused = true; pause.style.display = 'flex' }); // if the browser refuses the lock, fall back to the pause card
+  document.addEventListener('pointerlockchange', () => {
+    if (document.pointerLockElement === canvas) { paused = false; pause.style.display = 'none' }
+    else { paused = true; player.frozen = false; pause.style.display = 'flex' }
+  });
+  document.addEventListener('pointerlockerror', () => { if (performance.now() < retryUntil) setTimeout(lock, 250); else pause.style.display = 'flex' });
   resume(); // the Start/Join click is the gesture that lets us lock the mouse right away
 
   let frame = 0, sent = 0, emote = 0; const myName = playerName(); $('hint').style.display = $('stam').style.display = $('nav').style.display = 'block';
@@ -58,7 +61,6 @@ function launch(cfg, joined) {
   addEventListener('keydown', (e) => { if (e.code === 'KeyG' && document.pointerLockElement === canvas) wheel.toggle() });
   engine.runRenderLoop(() => {
     const p = player.cam.position;
-    if (!paused && document.pointerLockElement !== canvas && performance.now() - lockAt > 1500) { paused = true; player.frozen = false; pause.style.display = 'flex' } // lock was refused or lost: never sit in a dead state
     if (!paused) player.update(engine.getDeltaTime() / 1000);
     chunks.update(p.x, p.z);
     const tz = Math.max(p.z - 150, -cfg.length); // arrow points at the trail 150 m further along

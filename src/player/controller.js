@@ -22,12 +22,13 @@ export class Controller {
     const f = (k.KeyW ? 1 : 0) - (k.KeyS ? 1 : 0), s = (k.KeyD ? 1 : 0) - (k.KeyA ? 1 : 0), moving = f || s;
     const e = 1.5, gx = (h(p.x + e, p.z) - h(p.x - e, p.z)) / (2 * e), gz = (h(p.x, p.z + e) - h(p.x, p.z - e)) / (2 * e), grad = Math.hypot(gx, gz);
     const steep = grad > STEEP && this.grounded;
+    const wl = this.t.waterAt(p.x, p.z), wading = wl !== null && p.y - 1.7 < wl; // lakes slow you down
 
     // stamina: grabbing and sprinting drain it, resting refills it; at zero you let go and must recover before using it again
     this.climbing = this.grab && !this.exhausted && (steep || (this.climbing && grad > CLIMB_MIN));
-    const sprint = k.ShiftLeft && moving && this.grounded && !this.climbing && !this.exhausted && !steep;
-    let use = this.climbing ? (moving ? 9 : 5) : sprint ? 10 : 0;
-    const speed = this.climbing ? 2.2 : sprint ? 9 : 5, len = Math.hypot(f, s) || 1, sx = Math.sin(yaw), cz = Math.cos(yaw);
+    const sprint = k.ShiftLeft && moving && this.grounded && !this.climbing && !this.exhausted && !steep && !wading;
+    let use = this.climbing ? (moving ? 7 : 4) : sprint ? 10 : 0;
+    const speed = (this.climbing ? 2.2 : sprint ? 9 : 5) * (wading ? .55 : 1), len = Math.hypot(f, s) || 1, sx = Math.sin(yaw), cz = Math.cos(yaw);
     let nx = p.x + ((sx * f + cz * s) / len) * speed * dt, nz = p.z + ((cz * f - sx * s) / len) * speed * dt;
 
     if (!this.climbing && steep) { // too steep to walk up: block uphill steps and slide down
