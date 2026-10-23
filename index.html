@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mountain</title>
+<style>
+:root{--ink:#eef0f2;--mute:#9fb0c3;--card:#18222e;--line:#2c3a4b;--accent:#f0b35a}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;font-family:system-ui,sans-serif;color:var(--ink);background:#9bb8cf}
+#c{width:100%;height:100%;display:block;outline:none}
+#hud{position:fixed;top:12px;left:12px;font-size:14px;line-height:1.5;text-shadow:0 1px 3px #000a;pointer-events:none}
+#hint{display:none;position:fixed;bottom:10px;left:12px;font-size:12px;color:#fff;opacity:.8;text-shadow:0 1px 3px #000a;pointer-events:none}
+.inline button{background:#0f1721;border:1px solid var(--line);border-radius:6px;cursor:pointer;color:var(--ink)}
+#wheel{display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-160px);flex-direction:column;align-items:center;pointer-events:none}
+#wsvg path,#wsvg circle{fill:rgba(24,34,46,.9);stroke:var(--line);stroke-width:1}#wsvg .empty{fill:rgba(24,34,46,.35)}
+#wsvg text{fill:var(--ink);font-family:system-ui,sans-serif}#wsvg g.on path,#wsvg g.on circle{fill:var(--accent)}#wsvg g.on text{fill:#1a1205}
+#wnav{display:flex;gap:14px;align-items:center;margin-top:6px;font-size:13px;text-shadow:0 1px 3px #000a}
+#wnav button{width:44px;height:30px;font-size:20px;background:rgba(24,34,46,.9);border:1px solid var(--line);border-radius:6px;color:var(--ink)}#wnav button.on{background:var(--accent);color:#1a1205}
+#wcur{display:none;position:fixed;left:0;top:0;width:10px;height:10px;border-radius:50%;background:#fff;border:2px solid #000;pointer-events:none;z-index:5}
+#stam{display:none;position:fixed;bottom:34px;left:50%;transform:translateX(-50%);width:240px;height:10px;background:#0008;border:1px solid #fff4;border-radius:6px;overflow:hidden;pointer-events:none}
+#stam i{display:block;height:100%;width:100%;background:var(--accent)}#stam.low i{background:#e0544a}
+.screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:12px;overflow:auto}
+#menu{background:linear-gradient(#26364a,#6d8aa6 55%,#c9b79c)}
+#pause{background:#0007;display:none}
+.card{width:340px;max-width:100%;max-height:calc(100vh - 24px);overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px}
+h1{margin:0;font-size:26px;letter-spacing:.5px}.sub{margin:2px 0 14px;color:var(--mute);font-size:13px}
+.tabs{display:flex;gap:4px;margin-bottom:12px}
+.tabs button{flex:1;padding:6px;background:none;border:0;border-bottom:2px solid var(--line);color:var(--mute);cursor:pointer;font:inherit}
+.tabs button.on{color:var(--ink);border-color:var(--accent)}
+.row{margin-bottom:10px}label{display:block;font-size:12px;color:var(--mute);margin-bottom:3px}
+input,select{width:100%;padding:7px 8px;background:#0f1721;border:1px solid var(--line);border-radius:6px;color:var(--ink);font:inherit}
+.inline{display:flex;gap:6px}.inline button{width:38px;flex:none}
+.seg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{flex:1;padding:6px 0;background:#0f1721;border:0;border-right:1px solid var(--line);color:var(--mute);cursor:pointer;font:inherit;font-size:13px}
+.seg button:last-child{border:0}.seg button.on{background:var(--accent);color:#1a1205}
+.hint{font-size:12px;color:var(--mute);margin-top:4px}
+details{margin:2px 0 12px;font-size:13px;color:var(--mute)}summary{cursor:pointer;margin-bottom:8px}
+.go{width:100%;padding:10px;background:var(--accent);border:0;border-radius:6px;color:#1a1205;font:inherit;font-weight:600;cursor:pointer}
+button:disabled{opacity:.5;cursor:not-allowed}
+button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.hide{display:none}
+</style></head><body>
+<canvas id="c"></canvas><div id="hud"></div><div id="wheel"><svg id="wsvg" viewBox="0 0 320 320" width="320" height="320"></svg><div id="wnav"><button data-page="-1" aria-label="Previous page">&#8249;</button><span id="wpage"></span><button data-page="1" aria-label="Next page">&#8250;</button></div></div><div id="wcur"></div><div id="stam"><i></i></div><div id="hint">G: emotes · hold Left Click on steep ground to grab &amp; climb</div>
+<div id="menu" class="screen"><div class="card">
+  <h1>Mountain</h1><p class="sub">Walk to the summit. Bring friends.</p>
+  <div class="row"><label for="name">Your name</label><div class="inline"><input id="name" maxlength="16" placeholder="Climber" autocomplete="off"><button id="picBtn" type="button" title="Choose an emote picture" aria-label="Choose an emote picture"></button></div><input id="pic" type="file" accept="image/*" hidden><div class="hint"><span id="picHint"></span> <button id="picClear" type="button" hidden style="background:none;border:0;color:var(--accent);cursor:pointer;padding:0;font:inherit">clear</button></div></div>
+  <div class="tabs"><button class="on" data-tab="host">Host</button><button data-tab="join">Join</button></div>
+  <div id="host">
+    <div class="row"><label for="seed">Seed</label><div class="inline"><input id="seed" maxlength="24"><button id="dice" title="Random seed" aria-label="Random seed">&#127922;</button></div></div>
+    <div class="row"><label>Mountain size</label><div class="seg" id="size"></div><div class="hint" id="sizeHint"></div></div>
+    <div class="row"><label for="grab">Grabbing</label><select id="grab">
+      <option value="helpful">Helpful only (reach out to pull friends)</option>
+      <option value="free">Free grab (annoy anyone)</option><option value="off">Off</option></select></div>
+    <div class="row"><label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input id="open" type="checkbox" style="width:auto"> Let friends join (get a room code)</label></div>
+    <details><summary>More options</summary>
+      <label for="dist">View distance: <span id="distV"></span> chunks</label><input id="dist" type="range" min="3" max="8" value="5"></details>
+    <button class="go" id="go">Start climbing</button>
+  </div>
+  <div id="join" class="hide">
+    <div class="row"><label for="code">Room code</label><input id="code" maxlength="8" autocomplete="off" placeholder="e.g. k3x9q"></div>
+    <button class="go" id="joinBtn">Join</button><div class="hint" id="joinMsg"></div>
+  </div>
+</div></div>
+<div id="pause" class="screen"><div class="card" style="text-align:center">
+  <h1>Paused</h1><p class="sub">WASD move · Shift sprint · Space jump</p>
+  <button class="go" id="resume">Resume</button>
+  <p><button class="go" id="quit" style="background:none;border:1px solid var(--line);color:var(--ink)">Back to menu</button></p>
+</div></div>
+<script src="https://cdn.babylonjs.com/babylon.js"></script>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script type="module" src="src/main.js"></script>
+</body></html>

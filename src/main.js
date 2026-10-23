@@ -1,0 +1,72 @@
+import { Terrain, BIOME_NAMES } from './world/terrain.js';
+import { Chunks } from './world/chunks.js';
+import { Controller } from './player/controller.js';
+import { initMenu, playerName, getPic } from './menu.js';
+import { Net } from './net.js';
+import { Avatar, EMOTES } from './player/avatar.js';
+import { createWheel } from './ui/wheel.js';
+
+const $ = (id) => document.getElementById(id), canvas = $('c');
+const q = new URLSearchParams(location.search); // ?seed=&length= still works as a quick override
+
+function launch(cfg, joined) {
+  if (!joined && q.get('seed')) cfg.seed = q.get('seed'); if (!joined && q.get('length')) cfg.length = +q.get('length');
+  window.gameConfig = cfg; // grab mode etc. are read by later systems
+  const terrain = new Terrain(cfg.seed, cfg.length);
+  const engine = new BABYLON.Engine(canvas, true), scene = new BABYLON.Scene(engine);
+  scene.clearColor = new BABYLON.Color4(.61, .72, .81, 1);
+  scene.fogMode = BABYLON.Scene.FOGMODE_EXP2; scene.fogDensity = 1.6 / (cfg.radius * 64); scene.fogColor = new BABYLON.Color3(.61, .72, .81);
+  new BABYLON.DirectionalLight('sun', new BABYLON.Vector3(-.5, -1, -.3), scene);
+  new BABYLON.HemisphericLight('amb', new BABYLON.Vector3(0, 1, 0), scene).intensity = 0.55;
+
+  const mat = (c) => { const m = new BABYLON.StandardMaterial('m', scene); m.diffuseColor = c; m.specularColor = BABYLON.Color3.Black(); return m };
+  const hx = 25, hz = -15, hy = terrain.height(hx, hz);
+  const house = BABYLON.MeshBuilder.CreateBox('house', { width: 8, height: 4, depth: 6 }, scene); house.position.set(hx, hy + 2, hz); house.material = mat(new BABYLON.Color3(.7, .5, .35));
+  const roof = BABYLON.MeshBuilder.CreateCylinder('roof', { height: 8, diameter: 6, tessellation: 3 }, scene);
+  roof.rotation.z = Math.PI / 2; roof.position.set(hx, hy + 5, hz); roof.scaling.x = 0.5; roof.material = mat(new BABYLON.Color3(.5, .15, .1));
+
+  const chunks = new Chunks(scene, terrain, cfg.radius);
+  const avatars = new Map(), hud = $('hud');
+  const addAv = (id) => { if (!avatars.has(id)) avatars.set(id, new Avatar(scene, id)) };
+  const handlers = { join: addAv, leave: (id) => { avatars.get(id)?.dispose(); avatars.delete(id) },
+    state: (d) => { addAv(d.id); const a = avatars.get(d.id); a.setState(d.p); a.setName(d.n) },
+    pic: (id, d) => { addAv(id); avatars.get(id).setPic(d) },
+    closed: () => { avatars.forEach(a => a.dispose()); avatars.clear(); room = 'Host left the room' } };
+  let net = joined, room = '';
+  if (joined) { joined.h = handlers; joined.peers.forEach(addAv); room = 'Room joined' }
+  else if (cfg.open) {
+    net = new Net(handlers); net.pics.h = getPic(); const tryHost = (n) => { const code = Math.random().toString(36).slice(2, 7);
+      net.host(code, cfg).then(() => room = `Room code: ${code}`).catch(() => n > 0 ? tryHost(n - 1) : room = 'Could not open a room (offline?)') }; tryHost(3);
+  }
+  const player = new Controller(scene, canvas, terrain, { x: net && !net.isHost ? 2 * (+net.id.slice(1) || 0) : 0, z: 0 });
+  const saveKey = `mountain:${cfg.seed}:${cfg.length}`;
+  try { const s = JSON.parse(localStorage.getItem(saveKey)); if (s) player.cam.position.set(s.x, s.y + 3, s.z) } catch {}
+  setInterval(() => { const p = player.cam.position; localStorage.setItem(saveKey, JSON.stringify({ x: p.x, y: p.y, z: p.z })) }, 3000);
+
+  let paused = true; const pause = $('pause');
+  const resume = () => { canvas.requestPointerLock(); pause.style.display = 'none'; paused = false };
+  $('resume').onclick = resume; $('quit').onclick = () => location.reload();
+  document.addEventListener('pointerlockchange', () => { if (document.pointerLockElement !== canvas) { paused = true; pause.style.display = 'flex' } });
+  pause.style.display = 'flex'; // first click on Resume locks the mouse
+
+  let frame = 0, sent = 0, emote = 0; const myName = playerName(); $('hint').style.display = $('stam').style.display = 'block';
+  const wheel = createWheel(EMOTES, (i) => { emote = i < 0 || emote === i + 1 ? 0 : i + 1 }, (open) => player.frozen = open);
+  addEventListener('keydown', (e) => { if (e.code === 'KeyG' && document.pointerLockElement === canvas) wheel.toggle() });
+  engine.runRenderLoop(() => {
+    const p = player.cam.position;
+    if (!paused) player.update(engine.getDeltaTime() / 1000);
+    chunks.update(p.x, p.z);
+    $('stam').firstChild.style.width = player.stamina + '%'; $('stam').classList.toggle('low', player.exhausted || player.stamina < 25);
+    avatars.forEach(a => a.update(engine.getDeltaTime() / 1000));
+    if (emote && !EMOTES[emote - 1]?.move && ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space'].some(c => player.keys[c])) emote = 0; // moving cancels an emote
+    if (net && performance.now() - sent > 66) { sent = performance.now(); net.send([+p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2), +player.cam.rotation.y.toFixed(3), emote, +player.climbing], myName) }
+    if (frame++ % 10 === 0) hud.innerHTML = `${Math.round(p.y)} m up · ${(terrain.progress(p.z) * 100).toFixed(1)}% to the summit<br>${BIOME_NAMES[terrain.biome(p.x, p.z)]}${room ? `<br>${room} · ${avatars.size + 1} player(s)` : ''}`;
+    scene.render();
+  });
+  addEventListener('resize', () => engine.resize());
+}
+
+const hideMenu = () => $('menu').style.display = 'none';
+initMenu((cfg) => { hideMenu(); launch(cfg, null) }, async (code, msg) => {
+  const net = new Net({}); net.myPic = getPic(); try { const cfg = await net.join(code); hideMenu(); launch(cfg, net) } catch { msg('Could not join. Check the code and try again.') }
+});
