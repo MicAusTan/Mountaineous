@@ -79,12 +79,14 @@ export class Terrain {
   }
   onPath(x, z) { const d = Math.abs(x - this.pathX(z)); return Math.max(0, Math.min(1, 1 - (d - 3) / 3)) }
   // Biomes come from noise; altitude only nudges the odds, so any biome can appear at any height.
-  biome(x, z, h = this.height(x, z)) {
-    const alt = Math.min(1, h / this.peak), n = (k) => this.fbm(x / 500, z / 500, 50 + k * 10, 3), a = Math.abs, score = [
-      n(0) - alt * 0.25, n(1) + 0.15 - a(alt - 0.3), n(2) - 0.05 - a(alt - 0.5) * 0.4, n(3) + alt * 0.3,
+  biomeScores(x, z, h = this.height(x, z)) {
+    const alt = Math.min(1, h / this.peak), n = (k) => this.fbm(x / 500, z / 500, 50 + k * 10, 3), a = Math.abs;
+    return [n(0) - alt * 0.25, n(1) + 0.15 - a(alt - 0.3), n(2) - 0.05 - a(alt - 0.5) * 0.4, n(3) + alt * 0.3,
       n(4) - 0.05 + alt * 0.45, n(5) + 0.1 - a(alt - 0.4) * 0.5, n(6) + 0.05 - a(alt - 0.15) * 0.8, n(7) + 0.05 - a(alt - 0.65) * 0.5];
+  }
+  biome(x, z, h = this.height(x, z)) {
     if (this.progress(z) < 0.02) return 0;
-    return score.indexOf(Math.max(...score));
+    const s = this.biomeScores(x, z, h); return s.indexOf(Math.max(...s));
   }
 }
 export const BIOME_NAMES = ['meadow', 'forest', 'badlands', 'rock', 'snow', 'autumn forest', 'swamp', 'alpine tundra'];

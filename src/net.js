@@ -38,5 +38,6 @@ export class Net {
   }
   relay(msg, except) { for (const [id, c] of this.conns) if (id !== except && c.open) c.send(msg) }
   send(p, n) { const m = { t: 's', id: this.id, p, n }; if (this.isHost) this.relay(m); else if (this.up?.open) this.up.send(m) }
+  sendPic(d) { if (this.isHost) { this.pics.h = d; this.relay({ t: 'pic', id: 'h', d }) } else if (this.up?.open) this.up.send({ t: 'pic', d }) }
   get count() { return this.isHost ? this.conns.size + 1 : 0 }
 }

@@ -37,7 +37,7 @@ export function createWheel(emotes, onPick, onToggle = () => {}) {
   document.addEventListener('mousedown', (e) => {
     if (!open) return; e.preventDefault(); e.stopPropagation(); if (!hov) return;
     if (hov.dataset.page) { page = (page + +hov.dataset.page + pages) % pages; render(); hover() }
-    else { onPick(+hov.dataset.i); api.close() }
+    else { onPick(+hov.dataset.i, e.button); api.close() }
   }, true);
   document.addEventListener('pointerlockchange', () => { if (!document.pointerLockElement) api.close() });
   return api;

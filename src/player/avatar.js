@@ -19,7 +19,7 @@ export class Avatar {
     this.root = new BABYLON.TransformNode('av', scene);
     const box = (w, h, d, parent, y, m) => { const b = BABYLON.MeshBuilder.CreateBox('b', { width: w, height: h, depth: d }, scene); b.parent = parent; b.position.y = y; b.material = m; return b };
     const pivot = (x, y) => { const n = new BABYLON.TransformNode('p', scene); n.parent = this.root; n.position.set(x, y, 0); return n };
-    box(.5, .7, .25, this.root, 1.15, body); box(.28, .28, .28, this.root, 1.65, skin);
+    box(.5, .7, .25, this.root, 1.15, body); this.head = box(.28, .28, .28, this.root, 1.65, skin);
     this.armL = pivot(-.34, 1.45); this.armR = pivot(.34, 1.45); this.legL = pivot(-.13, .8); this.legR = pivot(.13, .8);
     [this.armL, this.armR].forEach(a => box(.16, .6, .16, a, -.28, skin)); [this.legL, this.legR].forEach(l => box(.2, .8, .2, l, -.4, body));
     this.scene = scene; const pm = this.picMat = new BABYLON.StandardMaterial('pic', scene); // held picture: blank until the player uploads one
@@ -35,28 +35,32 @@ export class Avatar {
     this.pos = new BABYLON.Vector3(); this.yaw = 0; this.phase = 0; this.t = 0; this.emote = 0; this.climb = false; this.fresh = true;
     this.cur = P({}); this.cur = { aLx: 0, aLz: 0, aRx: 0, aRz: 0, lL: 0, lR: 0, drop: 0 };
   }
-  setPic(d) { if (!d) return; this.picMat.emissiveTexture = (() => { const t = new BABYLON.Texture(d, this.scene); t.anisotropicFilteringLevel = 8; return t })(); this.picMat.emissiveColor = BABYLON.Color3.White() }
+  setPic(d) { if (!d) { this.picMat.emissiveTexture = null; this.picMat.emissiveColor = new BABYLON.Color3(.92, .92, .88); return } this.picMat.emissiveTexture = (() => { const t = new BABYLON.Texture(d, this.scene); t.anisotropicFilteringLevel = 8; return t })(); this.picMat.emissiveColor = BABYLON.Color3.White() }
   setName(n) {
     if (!n || n === this.name) return; this.name = n; const c = this.tex.getContext(); c.clearRect(0, 0, 256, 64);
     c.font = 'bold 34px sans-serif'; c.textAlign = 'center'; c.lineWidth = 6; c.strokeStyle = 'rgba(0,0,0,.7)'; c.fillStyle = '#fff';
     c.strokeText(n, 128, 44); c.fillText(n, 128, 44); this.tex.update();
   }
-  setState([x, y, z, yaw, emote, climb]) { this.climb = !!climb; this.tgt = new BABYLON.Vector3(x, y - 1.7, z); this.tyaw = yaw; this.emote = emote | 0; if (this.fresh) { this.pos.copyFrom(this.tgt); this.fresh = false } }
+  setState([x, y, z, yaw, emote, flags]) { this.flags = flags | 0; this.climb = !!(flags & 1); this.tgt = new BABYLON.Vector3(x, y - 1.7, z); this.tyaw = yaw; this.emote = emote | 0; if (this.fresh) { this.pos.copyFrom(this.tgt); this.fresh = false } }
   update(dt) {
     if (!this.tgt) return; const k = Math.min(1, dt * 12), before = this.pos.clone(); this.t += dt;
-    this.pos.addInPlace(this.tgt.subtract(this.pos).scale(k));
-    let dy = this.tyaw - this.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); this.yaw += dy * k;
+    if (this.snap) this.pos.copyFrom(this.tgt); else this.pos.addInPlace(this.tgt.subtract(this.pos).scale(k));
+    let dy = this.tyaw - this.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); this.yaw += this.snap ? dy : dy * k;
     const speed = BABYLON.Vector3.Distance(before, this.pos) / Math.max(dt, 1e-3); this.phase += dt * Math.min(speed, 9) * 1.6;
     const sw = Math.sin(this.phase) * Math.min(1, speed / 4) * .8;
     const def = EMOTES[this.emote - 1], walk = P({ aL: [-sw, 0], aR: [sw, 0], lL: sw, lR: -sw }); let g = walk;
     if (def) { const o = def.pose(this.t); g = def.move ? { ...walk, aL: o.aL, aR: o.aR } : o } // walking legs stay for move-while emotes
     if (this.climb) { const cs = Math.sin(this.t * 6) * .35; g = P({ aL: [-2.6 + cs, -.2], aR: [-2.6 - cs, .2], lL: -.5 + cs, lR: -.5 - cs }) }
-    this.frame.setEnabled(!!def?.picture && !this.climb);
+    if (this.flags & 4 && !this.climb) g = { ...g, aL: [-1.9, -.1] }; // left click: left hand reaches for a hold
+    if (this.flags & 2) g = { ...g, aR: [-1.7, .1] };                  // right click: right hand reaches out
+    this.frame.setEnabled(!!def?.picture && !this.climb && !this.self);
     const c = this.cur, m = Math.min(1, dt * 10), l = (a, b) => a + (b - a) * m;
     c.aLx = l(c.aLx, g.aL[0]); c.aLz = l(c.aLz, g.aL[1]); c.aRx = l(c.aRx, g.aR[0]); c.aRz = l(c.aRz, g.aR[1]);
     c.lL = l(c.lL, g.lL); c.lR = l(c.lR, g.lR); c.drop = l(c.drop, g.drop);
     this.armL.rotation.set(c.aLx, 0, c.aLz); this.armR.rotation.set(c.aRx, 0, c.aRz); this.legL.rotation.x = c.lL; this.legR.rotation.x = c.lR;
-    this.root.position.set(this.pos.x, this.pos.y - c.drop, this.pos.z); this.root.rotation.y = this.yaw;
+    const bo = this.self ? -.3 : 0; // your own body sits a bit behind the camera
+    this.root.position.set(this.pos.x + Math.sin(this.yaw) * bo, this.pos.y - c.drop, this.pos.z + Math.cos(this.yaw) * bo); this.root.rotation.y = this.yaw;
   }
+  hideHead() { this.head.setEnabled(false); this.tag.setEnabled(false) }
   dispose() { this.root.getChildMeshes().forEach(m => m.dispose()); this.root.dispose() }
 }
