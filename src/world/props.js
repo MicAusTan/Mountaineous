@@ -42,9 +42,13 @@ export function makeProps(scene) {
   reg('tuft', 2, (i, r) => [cyl(.6 + i * .2, .3, .3, [.4, .7, .25], 0), cyl(.5, .25, .25, [.35, .65, .22], 0), cyl(.45, .25, .22, [.45, .72, .3], 0)].map((m, k) => { m.position.x = (k - 1) * .15; return m }));
   const flower = (c) => () => [cyl(.4, .04, .2, [.2, .5, .2]), facet(.22, 0, .45, 0, c, { jit: .1, seed: 2 })];
   reg('flowerY', 1, flower([1, .85, .2])); reg('flowerP', 1, flower([.95, .5, .75])); reg('flowerW', 1, flower([.98, .98, .95]));
-  return { P, V };
+  reg('overhang', 3, (i, r) => [ // an irregular slab with two lobes, so it reads as natural rock, not a block
+    facet(6, 0, 0, 0, mix([.5, .5, .52], [.42, .4, .4], r()), { jit: .3, sc: [1, .38, .8], seed: 40 + i }),
+    facet(3.4, 1.9, -.5, .5, [.48, .47, .5], { jit: .3, sc: [1, .5, .9], seed: 50 + i }),
+    facet(2.6, -2.1, -.3, -.6, [.45, .45, .47], { jit: .3, sc: [1, .55, 1], seed: 60 + i })]);
+  return { P, V, mat };
 }
-export const COLLIDE = { pine: [.45, 5], snowPine: [.45, 5], oak: [.5, 4], autumnA: [.5, 4], autumnB: [.5, 4], dead: [.35, 4], cactus: [.5, 3], boulder: [.95, 1.1], redRock: [.95, 1.1], snowRock: [.95, 1.1] }; // [radius, height] at scale 1
+export const COLLIDE = { pine: [.45, 5], snowPine: [.45, 5], oak: [.5, 4], autumnA: [.5, 4], autumnB: [.5, 4], dead: [.35, 4], cactus: [.5, 3], boulder: [1.15, 1, 1], redRock: [1.15, 1, 1], snowRock: [1.15, 1, 1] }; // [radius, height, climbable] at scale 1; climbable things can be grabbed, scaled and stood on
 const D = (density, items) => ({ density, items, total: items.reduce((a, i) => a + i[1], 0) }); // [prefab, weight, minScale, maxScale]
 export const DECOR = [ // index = biome id: meadow, forest, badlands, rock, snow, autumn, swamp, tundra
   D(.6, [['tuft', 10, 1, 2], ['flowerY', 3, 1, 1.5], ['flowerP', 3, 1, 1.5], ['flowerW', 2, 1, 1.5], ['bush', 2, .8, 1.4], ['oak', 1.2, .9, 1.4], ['boulder', 1, .4, 1.2]]),

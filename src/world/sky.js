@@ -4,7 +4,8 @@ export const VS = `precision highp float;
 attribute vec3 position; uniform mat4 worldViewProjection; varying vec3 vD;
 void main() { vD = position; gl_Position = worldViewProjection * vec4(position, 1.0); }`;
 export const FS = `precision highp float;
-varying vec3 vD; uniform vec3 sun; uniform float time; uniform vec3 horizon;
+varying vec3 vD; uniform vec3 sun; uniform float time; uniform vec3 horizon; uniform float cover; uniform float dark; uniform float flash;
+uniform vec3 zenith; uniform vec3 moon; uniform float night; uniform vec3 sunCol; uniform vec3 cloudCol;
 float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vn(vec2 p) {
   vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -18,21 +19,31 @@ float fbm(vec2 p) {
 void main() {
   vec3 d = normalize(vD);
   float h = clamp(d.y, 0.0, 1.0);
-  vec3 col = mix(horizon, vec3(0.26, 0.48, 0.84), pow(h, 0.5));
+  vec3 top = mix(zenith, horizon * 0.9, cover * 0.9);   // overcast: the blue is covered up
+  vec3 col = mix(horizon, top, pow(h, 0.5));
   float s = max(dot(d, sun), 0.0);
-  col += vec3(1.0, 0.85, 0.6) * pow(s, 24.0) * 0.35 + vec3(1.0, 0.95, 0.8) * smoothstep(0.9993, 0.9997, s);
+  col += sunCol * pow(s, 24.0) * 0.35 * (1.0 - cover) * (1.0 - night) + mix(sunCol, vec3(1.0), 0.6) * smoothstep(0.9993, 0.9997, s) * (1.0 - cover) * (1.0 - night);
+  float mo = max(dot(d, moon), 0.0);   // night: a pale moon and a few stars (hidden by cloud cover)
+  col += (vec3(0.85, 0.9, 1.0) * smoothstep(0.9991, 0.9995, mo) + vec3(0.25, 0.3, 0.45) * pow(mo, 40.0) * 0.25) * night * (1.0 - cover * 0.9);
+  if (d.y > 0.0 && night > 0.01) {
+    vec3 sp = d * 160.0; vec3 ci = floor(sp); vec3 fc = fract(sp) - 0.5;
+    float r = fract(sin(dot(ci, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+    col += vec3(0.9, 0.95, 1.0) * step(0.985, r) * smoothstep(0.14, 0.0, length(fc)) * (0.5 + 0.5 * fract(r * 91.7)) * night * (1.0 - cover) * smoothstep(0.02, 0.25, d.y);
+  }
   if (d.y > 0.0) {
     vec2 q = d.xz / (d.y + 0.12) * 1.5 + vec2(time * 0.012, time * 0.004);
     float c = fbm(q);
-    float cl = smoothstep(0.5, 0.78, c) * smoothstep(0.0, 0.2, d.y);
-    col = mix(col, vec3(0.95 + 0.05 * c), cl * 0.92);
+    float cl = smoothstep(0.5 - cover * 0.4, 0.78 - cover * 0.4, c) * smoothstep(0.0, 0.2, d.y);
+    vec3 cc = mix(vec3(0.95 + 0.05 * c), vec3(0.4, 0.42, 0.48) * (0.75 + 0.5 * c), dark) * cloudCol;   // storm clouds are dark and heavy
+    col = mix(col, cc, cl * 0.92);
   }
+  col += vec3(0.7, 0.75, 1.0) * flash;
   gl_FragColor = vec4(col, 1.0);
 }`;
 export function makeSky(scene, sun, horizon) {
   BABYLON.Effect.ShadersStore.skyVertexShader = VS; BABYLON.Effect.ShadersStore.skyFragmentShader = FS;
-  const m = new BABYLON.ShaderMaterial('sky', scene, { vertex: 'sky', fragment: 'sky' }, { attributes: ['position'], uniforms: ['worldViewProjection', 'sun', 'time', 'horizon'] });
-  m.setVector3('sun', sun); m.setColor3('horizon', horizon); m.setFloat('time', 0); m.backFaceCulling = false; m.disableDepthWrite = true;
-  const sky = BABYLON.MeshBuilder.CreateSphere('sky', { diameter: 1800, segments: 24 }, scene);
+  const m = new BABYLON.ShaderMaterial('sky', scene, { vertex: 'sky', fragment: 'sky' }, { attributes: ['position'], uniforms: ['worldViewProjection', 'sun', 'time', 'horizon', 'cover', 'dark', 'flash', 'zenith', 'moon', 'night', 'sunCol', 'cloudCol'] });
+  m.setVector3('sun', sun); m.setColor3('horizon', horizon); m.setFloat('time', 0); m.setFloat('cover', 0); m.setFloat('dark', 0); m.setFloat('flash', 0); m.setVector3('zenith', new BABYLON.Vector3(.26, .48, .84)); m.setVector3('moon', new BABYLON.Vector3(-.6, -.67, -.43)); m.setFloat('night', 0); m.setVector3('sunCol', new BABYLON.Vector3(1, .95, .85)); m.setVector3('cloudCol', new BABYLON.Vector3(1, 1, 1)); m.backFaceCulling = false; m.disableDepthWrite = true;
+  const sky = BABYLON.MeshBuilder.CreateSphere('sky', { diameter: 3000, segments: 24 }, scene);
   sky.material = m; sky.infiniteDistance = true; sky.isPickable = false; sky.applyFog = false; return sky;
 }

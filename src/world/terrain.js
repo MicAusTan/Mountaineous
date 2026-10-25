@@ -1,13 +1,16 @@
-// Pure math: same seed + length => same mountain on every client.
+// Pure math: same seed + length (+ generator version) => same mountain on every client.
+import { placeFeatures, FCS } from './features.js';
 export const HOUSE = { x: 25, z: -15 };   // starter house, on a flattened pad
 export const LAKE_CELL = 500;             // lakes are seeded one-per-cell
-const STEP = 5, ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t) };
+const STEP = 2, ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t) };
 export function hashSeed(s) { s = String(s); let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) } return h >>> 0 }
 
 export class Terrain {
-  constructor(seed, length = 20000) {
-    this.seed = hashSeed(seed); this.length = length; this.startFlat = 250; this.lakes = new Map();
-    this.buildProfile(); this.h0 = this.rawHeight(HOUSE.x, HOUSE.z);
+  // o.climb 0..1: how often climbing sections appear; o.step: tallest single cliff step in m (max 18, so a step always fits in one stamina bar); o.lakes: lake chance per cell
+  constructor(seed, length = 20000, o = {}) {
+    this.seed = hashSeed(seed); this.length = length; this.climb = o.climb ?? 0.5; this.stepMax = Math.min(o.step ?? 12, 18); this.lakeP = o.lakes ?? 0.2;
+    this.gen = o.gen ?? 1; this.featP = o.featP ?? 0.8; this.freeP = o.freeP ?? 0.025; /* featP: chance a cell gets an overhang; freeP: chance it gets an arch or spires instead */ this.house = HOUSE; this.fcache = new Map(); this.fnear = { key: null, list: [] }; // gen 1 = original mountain, gen 2 = adds 3D rock features
+    this.STEP = STEP; this.startFlat = 250; this.lakes = new Map(); this.buildProfile(); this.h0 = this.rawHeight(HOUSE.x, HOUSE.z);
   }
   rnd(ix, iz, k = 0) { // deterministic hash -> [0,1)
     let h = (Math.imul(ix, 374761393) + Math.imul(iz, 668265263) + Math.imul(this.seed + k, 2147483647)) | 0;
@@ -23,26 +26,75 @@ export class Terrain {
   pathX(z) { return Math.sin(z / 900) * 220 + (this.fbm(z / 400, 7.3, 91) - 0.5) * 300 }
   progress(z) { return Math.min(1, Math.max(0, -z / this.length)) }
 
-  // The climb profile: slope varies along the trail. Long gentle or steep-but-walkable stretches, with seeded ramps and cliff bands
-  // (steeper than the walk limit, so you have to grab and climb them) every so often.
+  // The climb profile = slope along the trail (distance d from the start): gentle/steep-but-walkable stretches, wide ramps, and cliffs.
+  // A cliff is a STAIRCASE of steps (each <= stepMax tall, so it fits in one stamina bar) separated by flat ledges that run the full width.
+  // Each step is either open (climbable everywhere) or SHEER: a smooth near-vertical wall (grade > 3, can't be grabbed) everywhere except
+  // for 1-2 climbable gaps. Each step's gaps are somewhere else along the ledge below it, so the way up is often sideways: climb a gap,
+  // walk along the ledge, find the next gap. Which steps are open or sheer, and where the gaps are, is random per step, so one climbable
+  // spot says nothing about the next. Every sheer step has at least one gap, so every cliff can always be climbed.
   buildProfile() {
-    const n = this.n = Math.ceil(this.length / STEP) + 2, sl = new Float32Array(n);
+    const n = this.n = Math.ceil(this.length / STEP) + 2, sl = new Float32Array(n), f = this.climb, seg = 1400 - 1180 * f, ledges = [], list = [];
     for (let i = 0; i < n; i++) sl[i] = 0.04 + 0.32 * ss(0.3, 0.8, this.noise(i * STEP / 1500, 3.7, 11));
-    for (let s = 0; s * 900 < this.length + 900; s++) {
-      if (this.rnd(s, 0, 300) > 0.7) continue;
-      const cliff = this.rnd(s, 1, 301) > 0.35, c = s * 900 + 200 + this.rnd(s, 2, 302) * 500, r = this.rnd(s, 3, 303), r2 = this.rnd(s, 4, 304);
-      const w = cliff ? 12 + r * 12 : 80 + r * 80, str = cliff ? 1.5 + r2 * 0.7 : 0.7 + r2 * 0.4;
-      for (let i = Math.max(0, Math.floor((c - w) / STEP)); i < Math.min(n, Math.ceil((c + w) / STEP)); i++) { const u = (i * STEP - c) / w; if (Math.abs(u) < 1) sl[i] += str * (1 - u * u) ** 2 }
+    const rise = (arr, from, len, str) => { // adds a smooth rise of exactly str*len/2 metres of height, however few samples fall inside it (short steps used to vanish between samples)
+      const H = str * len / 2, idx = [], w = []; let S = 0;
+      for (let i = Math.max(0, Math.floor(from / STEP)); i < Math.min(n, Math.ceil((from + len) / STEP)); i++) { const u = (i * STEP - from) / len; if (u >= 0 && u <= 1) { const v = Math.sin(Math.PI * u) ** 2; idx.push(i); w.push(v); S += v * STEP } }
+      if (S <= 0) { arr[Math.min(n - 1, Math.round((from + len / 2) / STEP))] += H / STEP; return }
+      for (let k = 0; k < idx.length; k++) arr[idx[k]] += w[k] * H / S;
+    };
+    let end = 0; // sections are placed one after another, never overlapping, so every step keeps its own ledge
+    if (f > 0) for (let s = 0; s * seg < this.length + seg; s++) {
+      if (this.rnd(s, 0, 300) > 0.85) continue;
+      let c = (s + 0.15 + 0.5 * this.rnd(s, 2, 302)) * seg;
+      if (this.rnd(s, 1, 301) < 0.3) { const w = 80 + this.rnd(s, 3, 303) * 80; c = Math.max(c, 300 + w, end + 30 + w); rise(sl, c - w, 2 * w, 0.35 + this.rnd(s, 4, 304) * 0.25); end = c + w } // wide ramp, never near the grab slope
+      else {
+        c = Math.max(c, 300, end + 30); let pos = c; const steps = 1 + Math.floor(this.rnd(s, 5, 305) * 4);
+        for (let k = 0; k < steps; k++) { // heights, steepness and ledge lengths all vary step to step
+          const H = this.stepMax * (0.45 + 0.55 * this.rnd(s, 10 + k, 306)), str = 1.7 + 0.7 * this.rnd(s, 20 + k, 307), L = 2 * H / str; // rise = str * L / 2 = H
+          for (let i = Math.max(0, Math.floor(pos / STEP)); i < Math.min(n, Math.ceil((pos + L) / STEP)); i++) sl[i] = 0.04; // a step is as tall as it says, not plus the ordinary slope
+          rise(sl, pos, L, str); list.push({ s, k, a: pos, L }); pos += L; const le = 6 + 12 * this.rnd(s, 30 + k, 308); ledges.push([pos, pos + le]); pos += le;
+        }
+        end = pos;
+      }
     }
-    this.tab = new Float32Array(n); let h = 0; for (let i = 0; i < n; i++) { this.tab[i] = h; h += sl[i] * STEP }
-    this.peak = this.tab[n - 1];
+    for (const [a, b] of ledges) for (let i = Math.max(0, Math.floor(a / STEP)); i < Math.min(n, Math.ceil(b / STEP)); i++) sl[i] = 0.03; // flat rest ledges
+    this.tab = new Float32Array(n); { let h = 0; for (let i = 0; i < n; i++) { this.tab[i] = h; h += sl[i] * STEP } } this.peak = this.tab[n - 1];
+    this.steps = []; this.sidx = new Int32Array(n + 2).fill(-1); let prev = null;
+    for (const st of list) { // decide, step by step, what is open, what is sheer, and where the gaps are
+      const i0 = Math.max(0, Math.floor(st.a / STEP)), i1 = Math.min(n - 2, Math.ceil((st.a + st.L) / STEP)); if (i1 <= i0) continue;
+      const mid = (i0 + i1) / 2 * STEP, px = this.pathX(-(mid + this.startFlat * 0.5)), R = (j) => this.rnd(st.s, 200 + st.k * 20 + j, 320), gaps = [];
+      if (st.k === 0) prev = null;
+      const dA = this.tab[i1] - this.tab[i0], sheer = dA >= 4 && R(0) < (st.k === 0 ? 0.6 : 0.75); // a tiny step can't be a real wall
+      if (sheer) for (let g = 0, ng = R(1) < 0.3 ? 2 : 1; g < ng; g++) {
+        const from = prev ?? px, side = R(6 + g) < 0.5 ? -1 : 1, off = st.k === 0 ? (R(8 + g) - 0.5) * 80 : side * (30 + 230 * R(8 + g)); // first gap near the trail, later ones wander sideways
+        gaps.push({ w: 7 + 18 * R(10 + g), xc: Math.max(px - 320, Math.min(px + 320, from + off)) });
+      }
+      prev = gaps.length ? gaps[0].xc : (prev ?? px);
+      // the wall's width scales with the step so even short steps become truly sheer (peak grade ~4-5)
+      this.steps.push({ i0, i1, dA, mid, lb: Math.max(1.2, Math.min(5, dA * 0.3 * (0.8 + 0.4 * R(14)))), sheer, gaps });
+      for (let i = i0; i < i1; i++) this.sidx[i] = this.steps.length - 1;
+    }
   }
-  baseHeight(z) {
-    const f = Math.min(Math.max(0, -z - this.startFlat * 0.5) / STEP, this.n - 1.001), i = Math.floor(f);
-    return this.tab[i] + (this.tab[i + 1] - this.tab[i]) * (f - i);
+  stepAt(x, z) { // the cliff step (if any) whose wall is at (x,z); same z-wobble as rawHeight
+    const zs = z + (this.fbm(x / 80, z / 160, 77, 3) - 0.44) * 60, f = Math.min(Math.max(0, -zs - this.startFlat * 0.5) / STEP, this.n - 1.001), si = this.sidx[Math.floor(f)];
+    return si < 0 ? null : this.steps[si];
+  }
+  features(cx, cz) { const key = cx * 131071 + cz; let l = this.fcache.get(key); if (!l) { l = placeFeatures(this, cx, cz); this.fcache.set(key, l) } return l }
+  featuresNear(x, z) { // features in the 3x3 cells around (x,z): cached for the cell, since collision asks every frame
+    const cx = Math.floor(x / FCS), cz = Math.floor(z / FCS), key = cx * 131071 + cz; if (this.fnear.key === key) return this.fnear.list;
+    const list = []; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) list.push(...this.features(cx + a, cz + b)); this.fnear = { key, list }; return list;
+  }
+  sheerAt(st, x) { // 0 = the staircase, 1 = the sheer wall, at this x along step `st`
+    if (!st.sheer) return 0; let open = 0;
+    for (const g of st.gaps) open = Math.max(open, 1 - ss(g.w, g.w + 25, Math.abs(x - g.xc))); return 1 - open;
+  }
+  baseHeight(z, x = 0) {
+    const f = Math.min(Math.max(0, -z - this.startFlat * 0.5) / STEP, this.n - 1.001), i = Math.floor(f), a = this.tab[i] + (this.tab[i + 1] - this.tab[i]) * (f - i);
+    const si = this.sidx[i]; if (si < 0) return a;
+    const st = this.steps[si], m = this.sheerAt(st, x); if (m <= 0) return a;
+    return a + (this.tab[st.i0] + st.dA * ss(st.mid - st.lb / 2, st.mid + st.lb / 2, f * STEP) - a) * m; // blend staircase -> the same height as one sheer wall
   }
   rawHeight(x, z) {
-    const t = this.progress(z), base = this.baseHeight(z);
+    const t = this.progress(z), zs = z + (this.fbm(x / 80, z / 160, 77, 3) - 0.44) * 60, base = this.baseHeight(zs, x); // zs: cliff lines wander and run diagonally, so they're never the same
     const rough = (this.fbm(x / 160, z / 160, 3) - 0.5) * 2 * (20 + 90 * t) * Math.min(1, t * 8) + (this.fbm(x / 30, z / 30, 20) - 0.5) * 6;
     const pathMask = Math.max(0, 1 - Math.abs(x - this.pathX(z)) / 40);
     return base + rough * (1 - pathMask * 0.85);
@@ -60,9 +112,9 @@ export class Terrain {
   lakeCell(i, j) {
     const key = i * 131071 + j; if (this.lakes.has(key)) return this.lakes.get(key);
     let lk = null;
-    if (this.rnd(i, j, 400) < 0.45) {
+    if (this.rnd(i, j, 400) < this.lakeP) {
       const x = (i + 0.2 + 0.6 * this.rnd(i, j, 401)) * LAKE_CELL, z = (j + 0.2 + 0.6 * this.rnd(i, j, 402)) * LAKE_CELL, R = 35 + 60 * this.rnd(i, j, 403);
-      if (z < -300 && this.progress(z) < 0.995 && Math.abs(x - this.pathX(z)) > R + 30 && Math.abs(this.rawHeight(x, z - R) - this.rawHeight(x, z + R)) < R * 0.5)
+      if (z < -200 && this.progress(z) < 0.995 && Math.abs(x - this.pathX(z)) > R + 20 && Math.abs(this.rawHeight(x, z - R) - this.rawHeight(x, z + R)) < R * 0.8)
         lk = { x, z, R, L: this.rawHeight(x, z) - 0.6 };
     }
     this.lakes.set(key, lk); return lk;

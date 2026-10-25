@@ -19,13 +19,14 @@ export class Avatar {
     this.root = new BABYLON.TransformNode('av', scene);
     const box = (w, h, d, parent, y, m) => { const b = BABYLON.MeshBuilder.CreateBox('b', { width: w, height: h, depth: d }, scene); b.parent = parent; b.position.y = y; b.material = m; return b };
     const pivot = (x, y) => { const n = new BABYLON.TransformNode('p', scene); n.parent = this.root; n.position.set(x, y, 0); return n };
-    box(.5, .7, .25, this.root, 1.15, body); this.head = box(.28, .28, .28, this.root, 1.65, skin);
-    this.armL = pivot(-.34, 1.45); this.armR = pivot(.34, 1.45); this.legL = pivot(-.13, .8); this.legR = pivot(.13, .8);
-    [this.armL, this.armR].forEach(a => box(.16, .6, .16, a, -.28, skin)); [this.legL, this.legR].forEach(l => box(.2, .8, .2, l, -.4, body));
+    box(.38, .7, .22, this.root, 1.15, body); this.head = box(.26, .26, .26, this.root, 1.65, skin);
+    this.armL = pivot(-.25, 1.45); this.armR = pivot(.25, 1.45); this.legL = pivot(-.1, .8); this.legR = pivot(.1, .8); // slim, so your own arms stay in view
+    [this.armL, this.armR].forEach(a => box(.13, .6, .13, a, -.28, skin)); [this.legL, this.legR].forEach(l => box(.15, .8, .15, l, -.4, body));
     this.scene = scene; const pm = this.picMat = new BABYLON.StandardMaterial('pic', scene); // held picture: blank until the player uploads one
-    pm.disableLighting = true; pm.emissiveColor = new BABYLON.Color3(.92, .92, .88); pm.backFaceCulling = false;
-    this.frame = BABYLON.MeshBuilder.CreatePlane('frame', { size: .7 }, scene); this.frame.parent = this.root;
-    this.frame.position.set(0, 1.5, .45); this.frame.rotation.y = Math.PI; this.frame.material = pm; this.frame.setEnabled(false);
+    pm.disableLighting = true; pm.emissiveColor = new BABYLON.Color3(.92, .92, .88); pm.backFaceCulling = true;
+    this.frame = new BABYLON.TransformNode('frame', scene); this.frame.parent = this.root; this.frame.position.set(0, 1.5, .45);
+    [0, Math.PI].forEach(ry => { const pl = BABYLON.MeshBuilder.CreatePlane('frame', { size: .7 }, scene); pl.parent = this.frame; pl.rotation.y = ry; pl.material = pm }); // a face each way: others see it upright, and so do you
+    this.frame.setEnabled(false);
     // name tag
     this.tex = new BABYLON.DynamicTexture('tag', { width: 256, height: 64 }, scene, false); this.tex.hasAlpha = true;
     const tm = new BABYLON.StandardMaterial('tm', scene); tm.emissiveTexture = this.tex; tm.opacityTexture = this.tex;
@@ -33,7 +34,8 @@ export class Avatar {
     this.tag = BABYLON.MeshBuilder.CreatePlane('tag', { width: 1.6, height: .4 }, scene); this.tag.parent = this.root;
     this.tag.position.y = 2.15; this.tag.material = tm; this.tag.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
     this.pos = new BABYLON.Vector3(); this.yaw = 0; this.phase = 0; this.t = 0; this.emote = 0; this.climb = false; this.fresh = true;
-    this.cur = P({}); this.cur = { aLx: 0, aLz: 0, aRx: 0, aRz: 0, lL: 0, lR: 0, drop: 0 };
+    this.reachTo = null; this.flags = 0; this.clasp = BABYLON.MeshBuilder.CreateSphere('clasp', { diameter: .2, segments: 6 }, scene); this.clasp.material = skin; this.clasp.setEnabled(false);
+    this.cur = P({}); this.cur = { aLx: 0, aLz: 0, aRx: 0, aRz: 0, lL: 0, lR: 0, drop: 0, lie: 0 }; this._v = new BABYLON.Vector3();
   }
   setPic(d) { if (!d) { this.picMat.emissiveTexture = null; this.picMat.emissiveColor = new BABYLON.Color3(.92, .92, .88); return } this.picMat.emissiveTexture = (() => { const t = new BABYLON.Texture(d, this.scene); t.anisotropicFilteringLevel = 8; return t })(); this.picMat.emissiveColor = BABYLON.Color3.White() }
   setName(n) {
@@ -53,14 +55,25 @@ export class Avatar {
     if (this.climb) { const cs = Math.sin(this.t * 6) * .35; g = P({ aL: [-2.6 + cs, -.2], aR: [-2.6 - cs, .2], lL: -.5 + cs, lR: -.5 - cs }) }
     if (this.flags & 4 && !this.climb) g = { ...g, aL: [-1.9, -.1] }; // left click: left hand reaches for a hold
     if (this.flags & 2) g = { ...g, aR: [-1.7, .1] };                  // right click: right hand reaches out
-    this.frame.setEnabled(!!def?.picture && !this.climb && !this.self);
+    const down = !!(this.flags & 16); if (down) g = P({ aL: [-.9 + Math.sin(this.t * 2.1) * .12, -1.3], aR: [-.4 + Math.sin(this.t * 1.7 + 1) * .12, 1.1], lL: .35, lR: -.5 }); // knocked down: limbs sprawled
+    this.frame.setEnabled(!!def?.picture && !this.climb && !down);
     const c = this.cur, m = Math.min(1, dt * 10), l = (a, b) => a + (b - a) * m;
     c.aLx = l(c.aLx, g.aL[0]); c.aLz = l(c.aLz, g.aL[1]); c.aRx = l(c.aRx, g.aR[0]); c.aRz = l(c.aRz, g.aR[1]);
-    c.lL = l(c.lL, g.lL); c.lR = l(c.lR, g.lR); c.drop = l(c.drop, g.drop);
+    c.lL = l(c.lL, g.lL); c.lR = l(c.lR, g.lR); c.drop = l(c.drop, g.drop); c.lie += ((down ? 1 : 0) - c.lie) * Math.min(1, dt * (down ? 9 : 3));
     this.armL.rotation.set(c.aLx, 0, c.aLz); this.armR.rotation.set(c.aRx, 0, c.aRz); this.legL.rotation.x = c.lL; this.legR.rotation.x = c.lR;
-    const bo = this.self ? -.3 : 0; // your own body sits a bit behind the camera
-    this.root.position.set(this.pos.x + Math.sin(this.yaw) * bo, this.pos.y - c.drop, this.pos.z + Math.cos(this.yaw) * bo); this.root.rotation.y = this.yaw;
+    const bo = this.self ? -.22 : 0; // your own body sits a bit behind the camera
+    const bx = this.pos.x + Math.sin(this.yaw) * bo, bz = this.pos.z + Math.cos(this.yaw) * bo; this.root.rotation.y = this.yaw;
+    if (c.lie > .001) { // lying on the back: tilt the whole body and keep its middle over the spot you're standing on
+      const rx = -1.5 * c.lie, q = BABYLON.Quaternion.RotationYawPitchRoll(this.yaw, rx, 0), v = new BABYLON.Vector3(0, .9, 0).rotateByQuaternionToRef(q, this._v), cy = (this.pos.y - c.drop + .9) * (1 - c.lie) + (this.pos.y + .16) * c.lie;
+      this.root.rotation.x = rx; this.root.position.set(bx - v.x, cy - v.y, bz - v.z);
+    } else { this.root.rotation.x = 0; this.root.position.set(bx, this.pos.y - c.drop, bz) }
+    if ((this.flags & 8) && this.reachTo) { // being pulled by a friend's hand: your arm stretches out to meet it
+      const cs = Math.cos(this.yaw), sn = Math.sin(this.yaw), r = this.root.position, rt = this.reachTo, ex = rt.x - (r.x + .25 * cs), ey = rt.y - (r.y + 1.45), ez = rt.z - (r.z - .25 * sn);
+      const lx = ex * cs - ez * sn, lz = ex * sn + ez * cs, len = Math.hypot(lx, ey, lz) || 1;
+      this.armR.rotationQuaternion = BABYLON.Quaternion.FromUnitVectorsToRef(new BABYLON.Vector3(0, -1, 0), new BABYLON.Vector3(lx / len, ey / len, lz / len), new BABYLON.Quaternion());
+      this.armR.scaling.y = Math.min(len / .56, 2.4); this.clasp.position.copyFrom(rt); this.clasp.setEnabled(true);
+    } else if (this.armR.rotationQuaternion) { this.armR.rotationQuaternion = null; this.armR.scaling.y = 1; this.clasp.setEnabled(false) }
   }
-  hideHead() { this.head.setEnabled(false); this.tag.setEnabled(false) }
-  dispose() { this.root.getChildMeshes().forEach(m => m.dispose()); this.root.dispose() }
+  hideHead() { this.head.setEnabled(false); this.tag.setEnabled(false); this.frame.position.z = 1.0; this.frame.scaling.setAll(.75) } // your own view: no head, picture held further out
+  dispose() { this.root.getChildMeshes().forEach(m => m.dispose()); this.clasp.dispose(); this.root.dispose() }
 }

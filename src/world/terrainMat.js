@@ -2,15 +2,15 @@
 export const VS = `precision highp float;
 attribute vec3 position; attribute vec3 normal; attribute vec4 color; attribute vec2 uv; attribute vec3 tint;
 uniform mat4 world; uniform mat4 viewProjection;
-varying vec3 vP; varying vec3 vN; varying vec4 vW; varying vec3 vT; varying float vPath;
+varying vec3 vP; varying vec3 vN; varying vec4 vW; varying vec3 vT; varying float vPath; varying float vSheer;
 void main() {
   vec4 wp = world * vec4(position, 1.0);
-  vP = wp.xyz; vN = normalize((world * vec4(normal, 0.0)).xyz); vW = color; vT = tint; vPath = uv.x;
+  vP = wp.xyz; vN = normalize((world * vec4(normal, 0.0)).xyz); vW = color; vT = tint; vPath = uv.x; vSheer = uv.y;
   gl_Position = viewProjection * wp;
 }`;
 export const FS = `precision highp float;
-varying vec3 vP; varying vec3 vN; varying vec4 vW; varying vec3 vT; varying float vPath;
-uniform vec3 camPos; uniform vec3 sunDir; uniform vec3 fogColor; uniform vec2 fogRange;
+varying vec3 vP; varying vec3 vN; varying vec4 vW; varying vec3 vT; varying float vPath; varying float vSheer;
+uniform vec3 camPos; uniform vec3 sunDir; uniform vec3 fogColor; uniform vec2 fogRange; uniform vec3 sunCol; uniform vec3 ambCol; uniform float sunAmt; uniform float wet; uniform float snowCover; uniform float peakH;
 float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vn(vec2 p) {
   vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -46,17 +46,20 @@ void main() {
   float peb = step(0.8, vn(p * 5.0));
   vec3 dirt = vec3(0.5, 0.38, 0.24) * (0.8 + 0.35 * mid + 0.2 * fine) * (1.0 + 0.3 * peb * near);
   col = mix(col, dirt, vPath);
+  col = mix(col, vec3(0.26, 0.29, 0.34) * (0.92 + 0.12 * fine), vSheer);   // sheer faces: smooth, dark, no cracks to hold
+  col = mix(col, vec3(0.93, 0.95, 1.0) * (0.94 + 0.1 * mid), snowCover * smoothstep(0.3, 0.55, vP.y / peakH) * smoothstep(0.5, 0.82, n.y) * (1.0 - vSheer));   // weather: fresh snow settles on flat ground, not on sheer rock
+  col *= 1.0 - 0.3 * wet * (1.0 - snowCover * 0.8);   // rain darkens everything
   float ndl = max(dot(n, sunDir), 0.0);
   float hemi = 0.5 + 0.5 * n.y;
-  col *= vec3(0.42, 0.46, 0.55) * hemi + vec3(1.0, 0.95, 0.85) * ndl * 0.75;
+  col *= ambCol * hemi + sunCol * ndl * 0.75 * sunAmt;
   float f = clamp((dist - fogRange.x) / (fogRange.y - fogRange.x), 0.0, 1.0);
   gl_FragColor = vec4(mix(col, fogColor, f), 1.0);
 }`;
 export function makeTerrainMaterial(scene, env) {
   BABYLON.Effect.ShadersStore.terrainVertexShader = VS; BABYLON.Effect.ShadersStore.terrainFragmentShader = FS;
   const m = new BABYLON.ShaderMaterial('terrain', scene, { vertex: 'terrain', fragment: 'terrain' }, {
-    attributes: ['position', 'normal', 'color', 'uv', 'tint'], uniforms: ['world', 'viewProjection', 'camPos', 'sunDir', 'fogColor', 'fogRange'] });
+    attributes: ['position', 'normal', 'color', 'uv', 'tint'], uniforms: ['world', 'viewProjection', 'camPos', 'sunDir', 'fogColor', 'fogRange', 'sunAmt', 'wet', 'snowCover', 'peakH', 'sunCol', 'ambCol'] });
   m.backFaceCulling = false; m.setVector3('sunDir', env.sun); m.setColor3('fogColor', env.fogColor);
-  m.setVector2('fogRange', new BABYLON.Vector2(env.fogStart, env.fogEnd)); m.setVector3('camPos', BABYLON.Vector3.Zero());
+  m.setVector2('fogRange', new BABYLON.Vector2(env.fogStart, env.fogEnd)); m.setVector3('camPos', BABYLON.Vector3.Zero()); m.setFloat('sunAmt', 1); m.setFloat('wet', 0); m.setFloat('snowCover', 0); m.setFloat('peakH', 4000); m.setVector3('sunCol', new BABYLON.Vector3(1, .95, .85)); m.setVector3('ambCol', new BABYLON.Vector3(.42, .46, .55));
   return m;
 }

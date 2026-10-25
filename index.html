@@ -7,20 +7,25 @@
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;overflow:hidden;font-family:system-ui,sans-serif;color:var(--ink);background:#9bb8cf}
 #c{width:100%;height:100%;display:block;outline:none}
-#hud{position:fixed;top:12px;left:12px;font-size:14px;line-height:1.5;text-shadow:0 1px 3px #000a;pointer-events:none}
-#hint{display:none;position:fixed;bottom:10px;left:12px;font-size:12px;color:#fff;opacity:.8;text-shadow:0 1px 3px #000a;pointer-events:none}
-.inline button{background:#0f1721;border:1px solid var(--line);border-radius:6px;cursor:pointer;color:var(--ink)}
-#wheel{display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-160px);flex-direction:column;align-items:center}
-#wsvg path,#wsvg circle{fill:rgba(24,34,46,.9);stroke:var(--line);stroke-width:1}#wsvg .empty{fill:rgba(24,34,46,.35)}
-#wsvg text{fill:var(--ink);font-family:system-ui,sans-serif}#wsvg g.on path,#wsvg g.on circle{fill:var(--accent)}#wsvg g.on text{fill:#1a1205}
-#wnav{display:flex;gap:14px;align-items:center;margin-top:6px;font-size:13px;text-shadow:0 1px 3px #000a}
-#wnav button{width:44px;height:30px;font-size:20px;background:rgba(24,34,46,.9);border:1px solid var(--line);border-radius:6px;color:var(--ink)}#wnav button.on{background:var(--accent);color:#1a1205}
-#wcur{display:none;position:fixed;left:0;top:0;width:10px;height:10px;border-radius:50%;background:#fff;border:2px solid #000;pointer-events:none;z-index:5}
-#stam{display:none;position:fixed;bottom:34px;left:50%;transform:translateX(-50%);width:240px;height:10px;background:#0008;border:1px solid #fff4;border-radius:6px;overflow:hidden;pointer-events:none}
-#stam i{display:block;height:100%;width:100%;background:var(--accent)}#stam.low i{background:#e0544a}
+#hud{position:fixed;top:12px;left:12px;font-size:13px;line-height:1.5;text-shadow:0 1px 3px #000a;pointer-events:none}
+#hud .alt{font-size:20px;line-height:1.2}#hud .alt span{font-size:13px;opacity:.8}
+#hud .bar{position:relative;width:240px;height:8px;margin:5px 0;border-radius:4px;background:rgba(10,16,24,.72);border:1px solid rgba(255,255,255,.3)}
+#hud .bar i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#8fd0ff,#ffd27d)}
+#hud .bar u{position:absolute;top:-4px;width:6px;height:14px;margin-left:-3px;border-radius:3px;border:1px solid #000}#hud .bar u.me{background:#fff;top:-5px;height:16px}
+#hud .meta{opacity:.9}
+#hint{display:none;position:fixed;bottom:10px;right:14px;font-size:12px;color:#fff;opacity:.8;text-align:right;text-shadow:0 1px 3px #000a;pointer-events:none}
 #nav{display:none;position:fixed;top:12px;left:50%;transform:translateX(-50%);text-align:center;font-size:12px;text-shadow:0 1px 3px #000a;pointer-events:none}
 #arrow{display:block;font-size:26px;line-height:1;color:var(--accent)}
-#whint{margin-top:6px;font-size:11px;opacity:.8;text-shadow:0 1px 3px #000a}
+/* energy bar: bottom left; afflictions (hunger, cold, poison...) eat into the right-hand end of it */
+#energy{display:none;position:fixed;left:18px;bottom:18px;width:280px;pointer-events:none}
+#ebar{position:relative;height:20px;border-radius:10px;background:rgba(10,16,24,.78);border:1px solid rgba(255,255,255,.28);overflow:hidden;box-shadow:0 2px 8px #0006}
+#efill{position:absolute;left:0;top:0;bottom:0;width:100%;background:linear-gradient(#ffd27d,#e9972f);border-radius:10px;transition:background .2s}
+#energy.low #efill{background:linear-gradient(#ff8a80,#d6453d);animation:pulse .6s infinite alternate}
+#ebar::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(90deg,transparent 0 calc(10% - 1px),rgba(0,0,0,.28) calc(10% - 1px) 10%);pointer-events:none}
+#eaff{position:absolute;inset:0;pointer-events:none;z-index:1}
+#eaff span{position:absolute;top:0;bottom:0;background-image:repeating-linear-gradient(45deg,rgba(0,0,0,.28) 0 4px,transparent 4px 8px);box-shadow:inset 1px 0 0 rgba(0,0,0,.5)}
+#elabel{display:block;margin-top:4px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;text-shadow:0 1px 3px #000a;opacity:.85}
+@keyframes pulse{to{opacity:.65}}
 .screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:12px;overflow:auto}
 #menu{background:linear-gradient(#26364a,#6d8aa6 55%,#c9b79c)}
 #pause{background:#0007;display:none}
@@ -31,44 +36,74 @@ h1{margin:0;font-size:26px;letter-spacing:.5px}.sub{margin:2px 0 14px;color:var(
 .tabs button.on{color:var(--ink);border-color:var(--accent)}
 .row{margin-bottom:10px}label{display:block;font-size:12px;color:var(--mute);margin-bottom:3px}
 input,select{width:100%;padding:7px 8px;background:#0f1721;border:1px solid var(--line);border-radius:6px;color:var(--ink);font:inherit}
-.inline{display:flex;gap:6px}.inline button{width:38px;flex:none}
-.seg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+input[type=range]{padding:0}
+.inline{display:flex;gap:6px}.inline button{width:38px;flex:none;background:#0f1721;border:1px solid var(--line);border-radius:6px;cursor:pointer;color:var(--ink)}
+.seg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;margin-bottom:12px}
 .seg button{flex:1;padding:6px 0;background:#0f1721;border:0;border-right:1px solid var(--line);color:var(--mute);cursor:pointer;font:inherit;font-size:13px}
 .seg button:last-child{border:0}.seg button.on{background:var(--accent);color:#1a1205}
 .hint{font-size:12px;color:var(--mute);margin-top:4px}
 details{margin:2px 0 12px;font-size:13px;color:var(--mute)}summary{cursor:pointer;margin-bottom:8px}
 .go{width:100%;padding:10px;background:var(--accent);border:0;border-radius:6px;color:#1a1205;font:inherit;font-weight:600;cursor:pointer}
+.go.ghost{background:none;border:1px solid var(--line);color:var(--ink)}
 button:disabled{opacity:.5;cursor:not-allowed}
 button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .hide{display:none}
+#wlist{max-height:300px;overflow:auto}
+.world{display:flex;gap:6px;align-items:center;padding:8px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;background:#0f1721}
+.world>div{flex:1;min-width:0}.world b{display:block;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.world small{color:var(--mute);font-size:11px;display:block}
+.world button{padding:6px 10px;border-radius:6px;border:1px solid var(--line);background:var(--accent);color:#1a1205;cursor:pointer;font:inherit;font-size:12px}
+.world button.del{background:none;color:var(--mute)}
+#wheel{display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-160px);flex-direction:column;align-items:center}
+#wsvg path,#wsvg circle{fill:rgba(24,34,46,.9);stroke:var(--line);stroke-width:1}#wsvg .empty{fill:rgba(24,34,46,.35)}
+#wsvg text{fill:var(--ink);font-family:system-ui,sans-serif}#wsvg g.on path,#wsvg g.on circle{fill:var(--accent)}#wsvg g.on text{fill:#1a1205}
+#wnav{display:flex;gap:14px;align-items:center;margin-top:6px;font-size:13px;text-shadow:0 1px 3px #000a}
+#wnav button{width:44px;height:30px;font-size:20px;background:rgba(24,34,46,.9);border:1px solid var(--line);border-radius:6px;color:var(--ink)}#wnav button.on{background:var(--accent);color:#1a1205}
+#whint{margin-top:6px;font-size:11px;opacity:.8;text-shadow:0 1px 3px #000a}
+#wcur{display:none;position:fixed;left:0;top:0;width:10px;height:10px;border-radius:50%;background:#fff;border:2px solid #000;pointer-events:none;z-index:5}
 </style></head><body>
-<canvas id="c"></canvas><div id="hud"></div><div id="wheel"><svg id="wsvg" viewBox="0 0 320 320" width="320" height="320"></svg><div id="wnav"><button data-page="-1" aria-label="Previous page">&#8249;</button><span id="wpage"></span><button data-page="1" aria-label="Next page">&#8250;</button></div><div id="whint">Right-click &ldquo;Picture&rdquo; to change its image</div></div><div id="wcur"></div><div id="nav"><span id="arrow">&#9650;</span><small>trail</small></div><div id="stam"><i></i></div><div id="hint">G: emotes · Left click: grab / climb · Right click: reach out</div>
+<canvas id="c"></canvas><div id="hud"></div>
+<div id="energy"><div id="ebar"><i id="efill"></i><div id="eaff"></div></div><span id="elabel">Energy</span></div>
+<div id="nav"><span id="arrow">&#9650;</span><small>trail</small></div>
+<div id="hint">G: emotes · R: ragdoll · Left click: grab / climb · Right click: reach out</div>
+<div id="wheel"><svg id="wsvg" viewBox="0 0 320 320" width="320" height="320"></svg><div id="wnav"><button data-page="-1" aria-label="Previous page">&#8249;</button><span id="wpage"></span><button data-page="1" aria-label="Next page">&#8250;</button></div><div id="whint">Right-click &ldquo;Picture&rdquo; to change its image</div></div><div id="wcur"></div>
 <div id="menu" class="screen"><div class="card">
   <h1>Mountain</h1><p class="sub">Walk to the summit. Bring friends.</p>
   <div class="row"><label for="name">Your name</label><div class="inline"><input id="name" maxlength="16" placeholder="Climber" autocomplete="off"><button id="picBtn" type="button" title="Choose an emote picture" aria-label="Choose an emote picture"></button></div><input id="pic" type="file" accept="image/*" hidden><div class="hint"><span id="picHint"></span> <button id="picClear" type="button" hidden style="background:none;border:0;color:var(--accent);cursor:pointer;padding:0;font:inherit">clear</button></div></div>
   <div class="tabs"><button class="on" data-tab="host">Host</button><button data-tab="join">Join</button></div>
   <div id="host">
-    <div class="row"><label for="seed">Seed</label><div class="inline"><input id="seed" maxlength="24"><button id="dice" title="Random seed" aria-label="Random seed">&#127922;</button></div></div>
-    <div class="row"><label>Mountain size</label><div class="seg" id="size"></div><div class="hint" id="sizeHint"></div></div>
-    <div class="row"><label for="spawn">Late joiners spawn</label><select id="spawn"><option value="base">At the base</option><option value="host">Next to the host</option></select></div>
-    <div class="row"><label for="grab">Grabbing</label><select id="grab">
-      <option value="helpful">Helpful only (reach out to pull friends)</option>
-      <option value="free">Free grab (annoy anyone)</option><option value="off">Off</option></select></div>
-    <div class="row"><label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input id="open" type="checkbox" style="width:auto"> Let friends join (get a room code)</label></div>
-    <div class="row hide" id="contRow"><label style="display:flex;gap:8px;align-items:center;cursor:pointer;color:var(--ink)"><input id="cont" type="checkbox" checked style="width:auto"> <span id="contTxt"></span></label></div>
-    <details><summary>More options</summary>
-      <label for="dist">View distance: <span id="distV"></span> chunks</label><input id="dist" type="range" min="3" max="10" value="6"></details>
-    <button class="go" id="go">Start climbing</button>
+    <div class="seg" id="mode"><button class="on" data-m="new">New world</button><button data-m="saved">Saved worlds <span id="wcount"></span></button></div>
+    <div id="newW">
+      <div class="row"><label for="wname">World name</label><input id="wname" maxlength="24" placeholder="My climb" autocomplete="off"></div>
+      <div class="row"><label for="seed">Seed</label><div class="inline"><input id="seed" maxlength="24"><button id="dice" title="Random seed" aria-label="Random seed">&#127922;</button></div></div>
+      <div class="row"><label>Mountain size</label><div class="seg" id="size" style="margin:0"></div><div class="hint" id="sizeHint"></div></div>
+      <div class="row"><label for="climbR">Climbing sections: <span id="climbV"></span></label><input id="climbR" type="range" min="0" max="100" step="5"><div class="hint" id="climbHint"></div></div>
+      <div class="row"><label for="step">Cliff step height</label><select id="step"><option value="8">Low (up to 8 m)</option><option value="12">Medium (up to 12 m)</option><option value="16">Tall (up to 16 m)</option></select><div class="hint">Big cliffs are built as steps with ledges to rest on. Some have a sheer, unclimbable middle.</div></div>
+      
+      <div class="row"><label for="spawn">Late joiners spawn</label><select id="spawn"><option value="base">At the base</option><option value="host">Next to the host</option></select></div>
+      <div class="row"><label for="grab">Grabbing</label><select id="grab">
+        <option value="helpful">Helpful only (reach out to pull friends)</option>
+        <option value="free">Free grab (annoy anyone)</option><option value="off">Off</option></select></div>
+      <div class="row"><label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input id="open" type="checkbox" style="width:auto"> Let friends join (get a room code)</label></div>
+      <details><summary>More options</summary>
+        <label for="dist">View distance: <span id="distV"></span> chunks</label><input id="dist" type="range" min="3" max="14" value="8"></details>
+      <button class="go" id="go">Start climbing</button>
+    </div>
+    <div id="savedW" class="hide"><div id="wlist"></div></div>
   </div>
   <div id="join" class="hide">
     <div class="row"><label for="code">Room code</label><input id="code" maxlength="8" autocomplete="off" placeholder="e.g. k3x9q"></div>
     <button class="go" id="joinBtn">Join</button><div class="hint" id="joinMsg"></div>
   </div>
 </div></div>
-<div id="pause" class="screen"><div class="card" style="text-align:center">
-  <h1>Paused</h1><p class="sub">WASD move · Shift sprint · Space jump</p>
+<div id="pause" class="screen"><div class="card">
+  <h1 style="text-align:center">Paused</h1><p class="sub" style="text-align:center">WASD move · Shift sprint · Space jump · Esc/Enter resumes</p>
+  <div class="row"><label for="fov">Field of view: <span id="fovV"></span>&deg;</label><input id="fov" type="range" min="50" max="110"></div>
+  <div class="row"><label for="vol">Sound volume: <span id="volV"></span></label><input id="vol" type="range" min="0" max="1" step="0.05"></div>
+  <div class="row"><label for="sens">Mouse sensitivity: <span id="sensV"></span>&times;</label><input id="sens" type="range" min="0.2" max="3" step="0.1"></div>
+  <div class="row"><label for="vd">View distance: <span id="vdV"></span> chunks</label><input id="vd" type="range" min="3" max="14"></div>
   <button class="go" id="resume">Resume</button>
-  <p><button class="go" id="quit" style="background:none;border:1px solid var(--line);color:var(--ink)">Back to menu</button></p>
+  <p style="margin-bottom:0"><button class="go ghost" id="quit">Back to menu</button></p>
 </div></div>
 <script src="https://cdn.babylonjs.com/babylon.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
