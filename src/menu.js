@@ -27,7 +27,7 @@ export function initMenu(onStart, onJoin) {
     localStorage.setItem('mountain:pic', d); picUi(); dispatchEvent(new Event('mountain:pic')) }; img.src = URL.createObjectURL(f) };
   picUi();
   $('seed').value = rid(); const cl = $('climbR'), clUi = () => { const f = cl.value / 100; $('climbV').textContent = f ? cl.value + '%' : 'none'; $('climbHint').textContent = f ? `roughly one every ${Math.round((1400 - 1180 * f) / .85 / 10) * 10} m of trail` : 'a purely walking mountain' };
-  cl.value = Math.round((st.climb ?? .5) * 100); cl.oninput = clUi; clUi(); $('step').value = [8, 12, 16].includes(st.step) ? st.step : 12; $('grab').value = st.grab || 'helpful'; $('spawn').value = st.joinSpawn || 'base';
+  cl.value = Math.round((st.climb ?? .5) * 100); cl.oninput = clUi; clUi(); $('step').value = [8, 12, 16, 22].includes(st.step) ? st.step : 12; $('grab').value = st.grab || 'helpful'; $('sites').value = st.sites ?? 1; $('hunger').value = st.hunger ?? 1; $('spawn').value = st.joinSpawn || 'base';
   $('open').checked = st.open !== false; $('dist').value = cfg.radius; $('distV').textContent = cfg.radius;
   const seg = $('size'), paint = () => { [...seg.children].forEach((b, i) => b.classList.toggle('on', SIZES[i][1] === cfg.length)); $('sizeHint').textContent = `${(cfg.length / 1000).toLocaleString()} km, ${time(cfg.length)} of walking` };
   SIZES.forEach(([n, v]) => { const b = document.createElement('button'); b.textContent = n; b.onclick = () => { cfg.length = v; paint() }; seg.append(b) }); paint();
@@ -36,7 +36,7 @@ export function initMenu(onStart, onJoin) {
     document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
     $('host').classList.toggle('hide', b.dataset.tab !== 'host'); $('join').classList.toggle('hide', b.dataset.tab !== 'join');
   });
-  const begin = (c) => { localStorage.setItem('mountain:settings', JSON.stringify({ v: 3, length: c.length, radius: c.radius, climb: c.climb, step: c.step, grab: c.grab, joinSpawn: c.joinSpawn, open: c.open })); $('menu').style.display = 'none'; onStart(c) };
+  const begin = (c) => { localStorage.setItem('mountain:settings', JSON.stringify({ v: 3, length: c.length, radius: c.radius, climb: c.climb, step: c.step, sites: c.sf, hunger: c.hunger, grab: c.grab, joinSpawn: c.joinSpawn, open: c.open })); $('menu').style.display = 'none'; onStart(c) };
 
   function renderWorlds() { // saved worlds, newest first, with enough detail to tell them apart
     const list = loadWorlds().sort((a, b) => b.played - a.played); $('wcount').textContent = list.length ? `(${list.length})` : '';
@@ -45,7 +45,7 @@ export function initMenu(onStart, onJoin) {
       const row = document.createElement('div'); row.className = 'world'; const pct = w.pos ? Math.round(Math.max(0, -w.pos.z) / w.length * 100) : 0;
       row.innerHTML = `<div><b>${esc(w.name)}</b><small>${pct}% up · ${sizeName(w.length)} · seed ${esc(w.seed)}</small><small>played ${ago(w.played)}</small></div><button class="play">Play</button><button class="del" aria-label="Delete world">&#10005;</button>`;
       row.querySelector('.play').onclick = () => { patchWorld(w.id, { played: Date.now() });
-        begin({ gen: w.gen || 1, seed: w.seed, length: w.length, climb: w.climb, step: w.step, grab: w.grab, joinSpawn: w.joinSpawn, open: w.open, radius: +$('dist').value, worldId: w.id, start: w.pos }) };
+        begin({ gen: w.gen || 1, sv: w.sv || 1, scn: w.scn || 0, sf: w.sf ?? 1, cv: w.cv || 0, hunger: w.hunger ?? 1, hv: w.hv, wt: w.wt, inv: w.inv, items: w.items, used: w.used, cp: w.cp, seed: w.seed, length: w.length, climb: w.climb, step: w.step, grab: w.grab, joinSpawn: w.joinSpawn, open: w.open, radius: +$('dist').value, worldId: w.id, start: w.pos }) };
       row.querySelector('.del').onclick = () => { if (confirm(`Delete "${w.name}"? This can't be undone.`)) { delWorld(w.id); renderWorlds() } };
       $('wlist').append(row);
     }
@@ -56,7 +56,7 @@ export function initMenu(onStart, onJoin) {
   });
   renderWorlds();
   $('go').onclick = () => {
-    const c = { gen: 2, seed: $('seed').value.trim() || rid(), length: cfg.length, climb: $('climbR').value / 100, step: +$('step').value, grab: $('grab').value, joinSpawn: $('spawn').value, open: $('open').checked, radius: +$('dist').value };
+    const c = { gen: 2, sv: 2, scn: 1, cv: 1, sf: +$('sites').value, hunger: +$('hunger').value, hv: .08, wt: 0, seed: $('seed').value.trim() || rid(), length: cfg.length, climb: $('climbR').value / 100, step: +$('step').value, grab: $('grab').value, joinSpawn: $('spawn').value, open: $('open').checked, radius: +$('dist').value };
     const w = { id: Date.now().toString(36) + rid(), name: $('wname').value.trim() || `World ${loadWorlds().length + 1}`, ...c, created: Date.now(), played: Date.now(), pos: null };
     delete w.radius; addWorld(w); begin({ ...c, worldId: w.id, start: null });
   };

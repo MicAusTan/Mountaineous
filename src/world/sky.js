@@ -5,7 +5,7 @@ attribute vec3 position; uniform mat4 worldViewProjection; varying vec3 vD;
 void main() { vD = position; gl_Position = worldViewProjection * vec4(position, 1.0); }`;
 export const FS = `precision highp float;
 varying vec3 vD; uniform vec3 sun; uniform float time; uniform vec3 horizon; uniform float cover; uniform float dark; uniform float flash;
-uniform vec3 zenith; uniform vec3 moon; uniform float night; uniform vec3 sunCol; uniform vec3 cloudCol;
+uniform float rainbow; uniform vec3 zenith; uniform vec3 moon; uniform float night; uniform vec3 sunCol; uniform vec3 cloudCol;
 float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vn(vec2 p) {
   vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -37,13 +37,18 @@ void main() {
     vec3 cc = mix(vec3(0.95 + 0.05 * c), vec3(0.4, 0.42, 0.48) * (0.75 + 0.5 * c), dark) * cloudCol;   // storm clouds are dark and heavy
     col = mix(col, cc, cl * 0.92);
   }
+  if (rainbow > 0.01 && d.y > -0.05) { // after rain, with the sun low and behind you: a rainbow around the point opposite the sun
+    float ang = acos(clamp(dot(d, -sun), -1.0, 1.0)); float rb = smoothstep(0.62, 0.67, ang) * (1.0 - smoothstep(0.74, 0.79, ang));
+    float hue = clamp((0.79 - ang) / 0.17, 0.0, 1.0) * 0.75; vec3 rc = clamp(abs(mod(hue * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+    col += rc * rb * rainbow * 0.32 * smoothstep(-0.02, 0.1, d.y);
+  }
   col += vec3(0.7, 0.75, 1.0) * flash;
   gl_FragColor = vec4(col, 1.0);
 }`;
 export function makeSky(scene, sun, horizon) {
   BABYLON.Effect.ShadersStore.skyVertexShader = VS; BABYLON.Effect.ShadersStore.skyFragmentShader = FS;
-  const m = new BABYLON.ShaderMaterial('sky', scene, { vertex: 'sky', fragment: 'sky' }, { attributes: ['position'], uniforms: ['worldViewProjection', 'sun', 'time', 'horizon', 'cover', 'dark', 'flash', 'zenith', 'moon', 'night', 'sunCol', 'cloudCol'] });
-  m.setVector3('sun', sun); m.setColor3('horizon', horizon); m.setFloat('time', 0); m.setFloat('cover', 0); m.setFloat('dark', 0); m.setFloat('flash', 0); m.setVector3('zenith', new BABYLON.Vector3(.26, .48, .84)); m.setVector3('moon', new BABYLON.Vector3(-.6, -.67, -.43)); m.setFloat('night', 0); m.setVector3('sunCol', new BABYLON.Vector3(1, .95, .85)); m.setVector3('cloudCol', new BABYLON.Vector3(1, 1, 1)); m.backFaceCulling = false; m.disableDepthWrite = true;
+  const m = new BABYLON.ShaderMaterial('sky', scene, { vertex: 'sky', fragment: 'sky' }, { attributes: ['position'], uniforms: ['worldViewProjection', 'sun', 'time', 'horizon', 'cover', 'dark', 'flash', 'zenith', 'moon', 'night', 'sunCol', 'cloudCol', 'rainbow'] });
+  m.setVector3('sun', sun); m.setColor3('horizon', horizon); m.setFloat('time', 0); m.setFloat('cover', 0); m.setFloat('dark', 0); m.setFloat('flash', 0); m.setVector3('zenith', new BABYLON.Vector3(.26, .48, .84)); m.setVector3('moon', new BABYLON.Vector3(-.6, -.67, -.43)); m.setFloat('night', 0); m.setFloat('rainbow', 0); m.setVector3('sunCol', new BABYLON.Vector3(1, .95, .85)); m.setVector3('cloudCol', new BABYLON.Vector3(1, 1, 1)); m.backFaceCulling = false; m.disableDepthWrite = true;
   const sky = BABYLON.MeshBuilder.CreateSphere('sky', { diameter: 3000, segments: 24 }, scene);
   sky.material = m; sky.infiniteDistance = true; sky.isPickable = false; sky.applyFog = false; return sky;
 }

@@ -2,6 +2,7 @@
 // so it can overhang. Pure math (like terrain.js): same seed + gen => same features on every client. Needs terrain gen >= 2.
 // Collision, standing and climbing all query the same field, so a ceiling is a ceiling and a wall is a wall.
 // Everything here is independent of Babylon so it can be tested in Node.
+import { sitesNear } from './sites.js';
 export const FCS = 64; // feature cell size (= chunk size)
 const smin = (a, b, k) => { const h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * k * 0.25 };
 
@@ -19,10 +20,16 @@ function sdSpire(p, x, y, z) { // a tapering, leaning tower: wide at its base (s
   const u = Math.min(1, Math.max(0, (y - p.y0) / p.h)), r = p.r0 * (1 - .6 * u), dr = (Math.hypot(x - (p.x + p.lx * u), z - (p.z + p.lz * u)) - r) * .85, dy = Math.max(p.y0 - y, y - (p.y0 + p.h));
   return Math.hypot(Math.max(dr, 0), Math.max(dy, 0)) + Math.min(Math.max(dr, dy), 0);
 }
+function sdOBox(p, x, y, z) { // a box turned to any direction (f along, w sideways, v up), rounded: used for tunnels that follow a sloping trail
+  const dx = x - p.x, dy = y - p.y, dz = z - p.z, lf = dx * p.f[0] + dy * p.f[1] + dz * p.f[2], lw = dx * p.w[0] + dy * p.w[1] + dz * p.w[2], lv = dx * p.v[0] + dy * p.v[1] + dz * p.v[2];
+  const qx = Math.abs(lf) - p.hf + p.r, qy = Math.abs(lw) - p.hw + p.r, qz = Math.abs(lv) - p.hv + p.r;
+  return Math.hypot(Math.max(qx, 0), Math.max(qy, 0), Math.max(qz, 0)) + Math.min(Math.max(qx, qy, qz), 0) - p.r;
+}
+const isCut = (p) => p.k === 3 || p.cut, cutOne = (p, x, y, z) => p.k === 5 ? sdOBox(p, x, y, z) : sdBox(p, x, y, z);
 function primsD(f, x, y, z) {
-  let d = 1e9;
-  for (const p of f.prims) { const v = p.k === 0 ? sdBox(p, x, y, z) : p.k === 1 ? sdPillar(p, x, y, z) : sdSpire(p, x, y, z); d = d > 1e8 ? v : smin(d, v, 1.2) }
-  return d;
+  let d = 1e9, cut = 1e9;
+  for (const p of f.prims) { if (isCut(p)) { cut = Math.min(cut, cutOne(p, x, y, z)); continue } const v = p.k === 0 ? sdBox(p, x, y, z) : p.k === 1 ? sdPillar(p, x, y, z) : p.k === 5 ? sdOBox(p, x, y, z) : sdSpire(p, x, y, z); d = d > 1e8 ? v : smin(d, v, 1.2) }
+  return cut < 1e8 ? Math.max(d, -cut) : d; // k 3 = a hollow: carved out of everything else (caves)
 }
 // Full field: the smooth primitives plus rocky lumps. Noise only matters near the surface, so far away we skip it (cheap).
 export function featureD(t, f, x, y, z) {
@@ -33,7 +40,8 @@ export function featureD(t, f, x, y, z) {
 function bound(prims) { // box around all primitives, with a margin for the rocky lumps
   let b = [1e9, 1e9, 1e9, -1e9, -1e9, -1e9];
   for (const p of prims) {
-    const hr = p.k === 0 ? Math.hypot(p.hx, p.hz) + p.r : p.k === 1 ? p.rad : p.r0 + Math.hypot(p.lx, p.lz), y0 = p.k === 2 ? p.y0 : p.y - p.hy, y1 = p.k === 2 ? p.y0 + p.h : p.y + p.hy;
+    if (isCut(p)) continue;
+    const hr = p.k === 0 ? Math.hypot(p.hx, p.hz) + p.r : p.k === 5 ? p.hy : p.k === 1 ? p.rad : p.r0 + Math.hypot(p.lx, p.lz), y0 = p.k === 2 ? p.y0 : p.y - p.hy, y1 = p.k === 2 ? p.y0 + p.h : p.y + p.hy;
     b = [Math.min(b[0], p.x - hr), Math.min(b[1], y0), Math.min(b[2], p.z - hr), Math.max(b[3], p.x + hr), Math.max(b[4], y1), Math.max(b[5], p.z + hr)];
   }
   const M = 2.5; return [b[0] - M, b[1] - M, b[2] - M, b[3] + M, b[4] + M, b[5] + M];
@@ -49,6 +57,15 @@ function placeFree(t, cx, cz, R) {
     if (t.progress(z) < .03 || Math.abs(x - t.pathX(z)) < 18 || Math.hypot(x - t.house.x, z - t.house.z) < 45 || t.waterAt(x, z) !== null || t.shore(x, z) > .02 || t.stepAt(x, z)) continue;
     const g = Math.hypot(t.height(x + 2, z) - t.height(x - 2, z), t.height(x, z + 2) - t.height(x, z - 2)) / 4; if (g > 1) continue;
     const prims = []; let kind;
+    if (t.cv && R(o + 3) < .55) { // cave: a rock mound with a tunnel and a round chamber carved out of it; the entrance faces the trail
+      const gs = []; for (let a = 0; a < 9; a++) gs.push(a ? t.height(x + Math.cos(a * .785) * 7, z + Math.sin(a * .785) * 7) : t.height(x, z)); const gMax = Math.max(...gs), gMin = Math.min(...gs); if (gMax - gMin > 1.6) continue; // needs fairly level ground (the dark floor follows it)
+      kind = 5; const ang = (t.pathX(z) > x ? 0 : Math.PI) + (R(o + 4) - .5) * .8, ax = Math.cos(ang), az = Math.sin(ang), floorY = gMin - 1.2, ceilY = gMax + 3.2, LEN = 7.5;
+      prims.push({ k: 0, x, y: gMax + 1.8, z, c: ax, s: az, hx: LEN, hy: 4.2, hz: 6, r: 2.4, taper: 0 });
+      prims.push({ k: 3, x: x + ax * 5.2, z: z + az * 5.2, y: (floorY + ceilY) / 2, c: ax, s: az, hx: 10.3, hy: (ceilY - floorY) / 2, hz: 1.75, r: .6, taper: 0 }); // the tunnel
+      prims.push({ k: 3, x: x - ax * 2.4, z: z - az * 2.4, y: (floorY + ceilY + 1.2) / 2, c: ax, s: az, hx: 3, hy: (ceilY + 1.2 - floorY) / 2, hz: 3, r: 1.3, taper: 0 }); // the chamber at the back
+      const bb = bound(prims); if (!offTrail(t, bb)) continue;
+      return [{ prims, bb, k: Math.floor(R(o + 28) * 1e6), x, z, h: t.height(x, z), ux: 1, uz: 0, kind, tip: [x + ax * (LEN + 2), z + az * (LEN + 2)], cave: { x, z, ax, az, len: LEN, rects: [[-5.1, 7.4, 1.75, 2.2], [-5.4, .6, 3, -2.4]] } }];
+    }
     if (R(o + 3) < .4) { // arch: two pillars carrying a lintel
       kind = 3; const ang = R(o + 4) * 6.283, ax = Math.cos(ang), az = Math.sin(ang), span = 4 + 2 * R(o + 5), rad = 1.7 + .6 * R(o + 6), gA = t.height(x + ax * span, z + az * span), gB = t.height(x - ax * span, z - az * span);
       if (Math.abs(gA - gB) > 4.5) continue;
@@ -70,6 +87,10 @@ function placeFree(t, cx, cz, R) {
 
 // Which features sit in cell (cx,cz)? One per cell at most, on steep ground off the trail.
 export function placeFeatures(t, cx, cz) {
+  const out = placeBase(t, cx, cz); if (t.scn && t.cv && t.gen >= 2) for (const st of sitesNear(t, (cx + .5) * FCS, (cz + .5) * FCS, FCS)) if (st.type === 'tunnel' && Math.floor(st.x / FCS) === cx && Math.floor(st.z / FCS) === cz) out.push(tunnelFeature(t, st)); // trail tunnels
+  return out;
+}
+function placeBase(t, cx, cz) {
   const out = []; if (t.gen < 2) return out;
   const ox = cx * FCS, oz = cz * FCS, R = (k) => t.rnd(cx, cz, 5000 + k);
   if (R(100) < t.freeP) return placeFree(t, cx, cz, R); // some cells hold a freestanding arch or spires instead
@@ -140,9 +161,10 @@ export function topSurface(t, x, z, feet) { // top of feature rock under (x,z) t
   return best;
 }
 // Something to hold within arm's reach of the body centre. Never an underside (ceiling rule), never flat ground (you just walk there).
+// Ceilings only: a wall leaning out up to ~44 degrees (normal.y -.7) can still be grabbed, and held to ~51 degrees (-.78); only a real roof can't.
 export function grip(t, x, cy, z, was = false) { // `was`: already holding on, so a small bump or lean in the face doesn't throw you off
   const d = solidD(t, x, cy, z); if (d >= 1) return null;
-  const n = normalAt(t, x, cy, z); if (n[1] < (was ? -.5 : -.15) || n[1] > .97) return null; return { n, d };
+  const n = normalAt(t, x, cy, z); if (n[1] < (was ? -.78 : -.7) || n[1] > .97) return null; return { n, d };
 }
 // Climb along the real surface: W goes "up" the face, A/D go sideways, then the body is pressed back to 0.55 m from the rock.
 export function climbMove(t, c, g, f, s, yaw, speed, dt) {
@@ -166,4 +188,20 @@ export function shelterTop(t, x, z) { // height of the highest rock above column
     const i = Math.min(g.nx - 1, Math.max(0, Math.round((x - g.x0) / g.res))), k = Math.min(g.nz - 1, Math.max(0, Math.round((z - g.z0) / g.res))); best = Math.max(best, g.top[i + k * g.nx]);
   }
   return best;
+}
+
+// Caves: how dark the rock surface at (x,y,z) should be (0 outside / at the entrance, 1 deep inside), so the inside looks like a cave without any real lighting.
+export function caveShade(f, x, y, z) {
+  if (!f.cave) return 0; let cut = 1e9; for (const p of f.prims) if (isCut(p)) cut = Math.min(cut, cutOne(p, x, y, z)); if (cut > 1.2) return 0;
+  const lx = (x - f.cave.x) * f.cave.ax + (z - f.cave.z) * f.cave.az, d = f.cave.sym ? f.cave.len - Math.abs(lx) : f.cave.len - lx, u = Math.max(0, Math.min(1, d / 5)); return u * u * (3 - 2 * u); // sym: a tunnel is dark in the middle and bright at both mouths
+}
+
+// A tunnel the trail runs through (a scenario from sites.js): a block of rock across the trail with a tube cut along it, tilted to follow the slope.
+function tunnelFeature(t, st) {
+  const { x, z, ax, az, L, y0, slope } = st.tunnel, th = Math.atan(slope), cp = Math.cos(th), sp = Math.sin(th);
+  const f = [ax * cp, sp, az * cp], w = [az, 0, -ax], v = [-ax * sp, cp, -az * sp], at = (k) => [x + v[0] * k, y0 + v[1] * k, z + v[2] * k];
+  const mk = (k, hf, hw, hv, r, cut) => { const c = at(k); return { k: 5, x: c[0], y: c[1], z: c[2], f, w, v, hf, hw, hv, r, cut, hy: Math.hypot(hf, hw, hv) + r } };
+  const prims = [mk(1.4, L / 2 + 1.4, 6.5, 4.3, 2.2, false), mk(.6, L / 2 + 10, 1.9, 3.0, .5, true)]; // the rock block, and the tube through it (much longer than the block: a short tube leaves lumpy bits of rock floating at its mouth)
+  const bb = bound(prims);
+  return { prims, bb, k: Math.floor(t.rnd(st.s, 1, 730) * 1e6), x, z, h: y0, ux: 1, uz: 0, kind: 6, tip: [x + ax * (L / 2 + 2), z + az * (L / 2 + 2)], cave: { x, z, ax, az, len: L / 2, sym: true, rects: [[-L / 2, L / 2, 1.7, 0]] } };
 }

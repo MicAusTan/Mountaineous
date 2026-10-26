@@ -10,12 +10,13 @@ export class Net {
       this.peer.on('connection', (c) => {
         c.on('open', () => {
           c._id = 'p' + (++this.n); const others = ['h', ...this.conns.keys()];
-          this.conns.set(c._id, c); c.send({ t: 'welcome', id: c._id, cfg: this.cfg, peers: others, at: this.h.where?.() ?? null });
+          this.conns.set(c._id, c); c.send({ t: 'welcome', id: c._id, cfg: this.cfg, peers: others, at: this.h.where?.() ?? null, items: this.h.items?.() ?? [], used: this.h.used?.() ?? [] });
           for (const [pid, d] of Object.entries(this.pics)) c.send({ t: 'pic', id: pid, d });
           this.relay({ t: 'join', id: c._id }, c._id); this.h.join(c._id);
         });
         c.on('data', (d) => {
           if (d.t === 's') { d.id = c._id; this.h.state(d); this.relay(d, c._id) }
+          else if (d.t === 'item') { this.h.itemOp?.(d, c._id); if (d.op === 'drop') this.relay(d, c._id) } // a friend dropped something (everyone else hears it) or wants to pick something up (the host decides, then tells everyone)
           else if (d.t === 'pic' && typeof d.d === 'string' && d.d.length < 200000) { this.pics[c._id] = d.d; this.h.pic?.(c._id, d.d); this.relay({ t: 'pic', id: c._id, d: d.d }, c._id) }
         });
         c.on('close', () => { this.conns.delete(c._id); this.relay({ t: 'leave', id: c._id }); this.h.leave(c._id) });
@@ -29,8 +30,8 @@ export class Net {
       this.peer.on('open', () => {
         const c = this.up = this.peer.connect(PREFIX + code);
         c.on('data', (d) => {
-          if (d.t === 'welcome') { clearTimeout(t); this.id = d.id; this.peers = d.peers; this.at = d.at; if (this.myPic) c.send({ t: 'pic', d: this.myPic }); res(d.cfg) }
-          else if (d.t === 's') this.h.state(d); else if (d.t === 'join') this.h.join(d.id); else if (d.t === 'leave') this.h.leave(d.id); else if (d.t === 'pic') this.h.pic?.(d.id, d.d);
+          if (d.t === 'welcome') { clearTimeout(t); this.id = d.id; this.peers = d.peers; this.at = d.at; this.items = d.items || []; this.used = d.used || []; if (this.myPic) c.send({ t: 'pic', d: this.myPic }); res(d.cfg) }
+          else if (d.t === 's') this.h.state(d); else if (d.t === 'join') this.h.join(d.id); else if (d.t === 'leave') this.h.leave(d.id); else if (d.t === 'pic') this.h.pic?.(d.id, d.d); else if (d.t === 'time') this.h.time?.(d.wt); else if (d.t === 'item') this.h.itemOp?.(d, 'h');
         });
         c.on('close', () => this.h.closed());
       });
@@ -38,6 +39,8 @@ export class Net {
   }
   relay(msg, except) { for (const [id, c] of this.conns) if (id !== except && c.open) c.send(msg) }
   send(p, n) { const m = { t: 's', id: this.id, p, n }; if (this.isHost) this.relay(m); else if (this.up?.open) this.up.send(m) }
+  sendTime(wt) { if (this.isHost) this.relay({ t: 'time', wt }) } // the host's world clock, now and then, so everyone's sun and weather stay together
+  sendItem(m) { const x = { t: 'item', ...m }; if (this.isHost) this.relay(x); else if (this.up?.open) this.up.send(x) } // host: tell everyone; friend: tell the host
   sendPic(d) { if (this.isHost) { this.pics.h = d; this.relay({ t: 'pic', id: 'h', d }) } else if (this.up?.open) this.up.send({ t: 'pic', d }) }
   get count() { return this.isHost ? this.conns.size + 1 : 0 }
 }

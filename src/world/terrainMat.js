@@ -10,7 +10,7 @@ void main() {
 }`;
 export const FS = `precision highp float;
 varying vec3 vP; varying vec3 vN; varying vec4 vW; varying vec3 vT; varying float vPath; varying float vSheer;
-uniform vec3 camPos; uniform vec3 sunDir; uniform vec3 fogColor; uniform vec2 fogRange; uniform vec3 sunCol; uniform vec3 ambCol; uniform float sunAmt; uniform float wet; uniform float snowCover; uniform float peakH;
+uniform vec3 camPos; uniform vec3 sunDir; uniform vec3 fogColor; uniform vec2 fogRange; uniform vec3 sunCol; uniform vec3 ambCol; uniform float sunAmt; uniform float wet; uniform float snowCover; uniform float peakH; uniform vec4 torch; uniform vec3 torchPos; uniform vec3 torchDir;
 float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vn(vec2 p) {
   vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -52,14 +52,20 @@ void main() {
   float ndl = max(dot(n, sunDir), 0.0);
   float hemi = 0.5 + 0.5 * n.y;
   col *= ambCol * hemi + sunCol * ndl * 0.75 * sunAmt;
+  if (torch.x > 0.0) { // flashlight: a soft cone from your hand, brighter up close, wider falloff at the edge
+    vec3 tl = torchPos - vP; float td = length(tl); vec3 tv = tl / max(td, 0.001);
+    float cone = smoothstep(torch.y, torch.z, dot(-tv, torchDir)); float fall = 1.0 / (1.0 + td * td * 0.012);
+    float lit = cone * fall * torch.x * (0.35 + 0.65 * max(dot(n, tv), 0.0));
+    col += max(vT * pat, vec3(0.34)) * vec3(1.0, 0.92, 0.72) * lit * 2.2; // (dark cave rock still lights up under a lamp)
+  }
   float f = clamp((dist - fogRange.x) / (fogRange.y - fogRange.x), 0.0, 1.0);
   gl_FragColor = vec4(mix(col, fogColor, f), 1.0);
 }`;
 export function makeTerrainMaterial(scene, env) {
   BABYLON.Effect.ShadersStore.terrainVertexShader = VS; BABYLON.Effect.ShadersStore.terrainFragmentShader = FS;
   const m = new BABYLON.ShaderMaterial('terrain', scene, { vertex: 'terrain', fragment: 'terrain' }, {
-    attributes: ['position', 'normal', 'color', 'uv', 'tint'], uniforms: ['world', 'viewProjection', 'camPos', 'sunDir', 'fogColor', 'fogRange', 'sunAmt', 'wet', 'snowCover', 'peakH', 'sunCol', 'ambCol'] });
+    attributes: ['position', 'normal', 'color', 'uv', 'tint'], uniforms: ['world', 'viewProjection', 'camPos', 'sunDir', 'fogColor', 'fogRange', 'sunAmt', 'wet', 'snowCover', 'peakH', 'sunCol', 'ambCol', 'torch', 'torchPos', 'torchDir'] });
   m.backFaceCulling = false; m.setVector3('sunDir', env.sun); m.setColor3('fogColor', env.fogColor);
-  m.setVector2('fogRange', new BABYLON.Vector2(env.fogStart, env.fogEnd)); m.setVector3('camPos', BABYLON.Vector3.Zero()); m.setFloat('sunAmt', 1); m.setFloat('wet', 0); m.setFloat('snowCover', 0); m.setFloat('peakH', 4000); m.setVector3('sunCol', new BABYLON.Vector3(1, .95, .85)); m.setVector3('ambCol', new BABYLON.Vector3(.42, .46, .55));
+  m.setVector2('fogRange', new BABYLON.Vector2(env.fogStart, env.fogEnd)); m.setVector3('camPos', BABYLON.Vector3.Zero()); m.setFloat('sunAmt', 1); m.setFloat('wet', 0); m.setFloat('snowCover', 0); m.setFloat('peakH', 4000); m.setVector3('sunCol', new BABYLON.Vector3(1, .95, .85)); m.setVector3('ambCol', new BABYLON.Vector3(.42, .46, .55)); m.setVector4('torch', new BABYLON.Vector4(0, .8, .93, 0)); m.setVector3('torchPos', BABYLON.Vector3.Zero()); m.setVector3('torchDir', new BABYLON.Vector3(0, 0, 1));
   return m;
 }

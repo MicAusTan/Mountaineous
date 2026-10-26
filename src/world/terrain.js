@@ -1,20 +1,29 @@
 // Pure math: same seed + length (+ generator version) => same mountain on every client.
 import { placeFeatures, FCS } from './features.js';
+import { siteSeg, sitesNear, padHeight, siteClear, spawnDef, allSites } from './sites.js';
 export const HOUSE = { x: 25, z: -15 };   // starter house, on a flattened pad
 export const LAKE_CELL = 500;             // lakes are seeded one-per-cell
-const STEP = 2, ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t) };
+const STEP = 2, STEP_CAP = 30, ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t) };
 export function hashSeed(s) { s = String(s); let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) } return h >>> 0 }
 
 export class Terrain {
-  // o.climb 0..1: how often climbing sections appear; o.step: tallest single cliff step in m (max 18, so a step always fits in one stamina bar); o.lakes: lake chance per cell
+  // o.climb 0..1: how often climbing sections appear; o.step: how tall cliff steps are in general (sv 2: the typical height, single steps vary from about half to over twice that, hard cap STEP_CAP; sv 1, saved worlds: the tallest step, max 18); o.lakes: lake chance per cell
   constructor(seed, length = 20000, o = {}) {
-    this.seed = hashSeed(seed); this.length = length; this.climb = o.climb ?? 0.5; this.stepMax = Math.min(o.step ?? 12, 18); this.lakeP = o.lakes ?? 0.2;
-    this.gen = o.gen ?? 1; this.featP = o.featP ?? 0.8; this.freeP = o.freeP ?? 0.025; /* featP: chance a cell gets an overhang; freeP: chance it gets an arch or spires instead */ this.house = HOUSE; this.fcache = new Map(); this.fnear = { key: null, list: [] }; // gen 1 = original mountain, gen 2 = adds 3D rock features
+    this.seed = hashSeed(seed); this.length = length; this.climb = o.climb ?? 0.5; this.sv = o.sv ?? 1; this.scn = o.scn ?? 0; this.sf = o.sf ?? 1; this.cv = o.cv ?? 0; /* scn: sites along the trail (sites.js), sf: how often (0 = none), cv: caves (features.js); older worlds have none of them */ this.step = o.step ?? 12; this.stepMax = this.sv >= 2 ? this.step : Math.min(this.step, 18); this.lakeP = o.lakes ?? 0.2;
+    this.gen = o.gen ?? 1; this.featP = o.featP ?? 0.8; this.freeP = o.freeP ?? (o.cv ? 0.05 : 0.025); /* featP: chance a cell gets an overhang; freeP: chance it gets an arch or spires instead */ this.house = HOUSE; this.fcache = new Map(); this.fnear = { key: null, list: [] }; // gen 1 = original mountain, gen 2 = adds 3D rock features
     this.STEP = STEP; this.startFlat = 250; this.lakes = new Map(); this.buildProfile(); this.h0 = this.rawHeight(HOUSE.x, HOUSE.z);
   }
   rnd(ix, iz, k = 0) { // deterministic hash -> [0,1)
     let h = (Math.imul(ix, 374761393) + Math.imul(iz, 668265263) + Math.imul(this.seed + k, 2147483647)) | 0;
     h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  }
+  stepH(u, v) { // height of one cliff step from two uniform randoms. sv 1 (old saves): 45%..100% of the option. sv 2: the option is the TYPICAL height: half to one and a half times it, and now and then a much bigger one
+    if (this.sv < 2) return this.stepMax * (0.45 + 0.55 * u);
+    return Math.min(STEP_CAP, this.step * (0.5 + u) * (v < 0.08 ? 1.5 : 1));
+  }
+  prnd(ix, iz, k = 0) { // a stronger hash for scenery placement (trees, rocks): rnd() gives nearly the same answer for neighbouring k, so x and z drawn from it fell on lines. Never used for terrain, so heights don't change.
+    let h = Math.imul(ix, 0x85ebca6b) ^ Math.imul(iz, 0xc2b2ae35) ^ Math.imul(k + 1, 0x27d4eb2f) ^ this.seed;
+    h = Math.imul(h ^ (h >>> 16), 0x7feb352d); h = Math.imul(h ^ (h >>> 15), 0x846ca68b); h ^= h >>> 16; h = Math.imul(h, 0x9e3779b1); h ^= h >>> 15; return (h >>> 0) / 4294967296;
   }
   noise(x, z, k = 0) { // smooth value noise
     const ix = Math.floor(x), iz = Math.floor(z), fx = x - ix, fz = z - iz;
@@ -49,7 +58,7 @@ export class Terrain {
       else {
         c = Math.max(c, 300, end + 30); let pos = c; const steps = 1 + Math.floor(this.rnd(s, 5, 305) * 4);
         for (let k = 0; k < steps; k++) { // heights, steepness and ledge lengths all vary step to step
-          const H = this.stepMax * (0.45 + 0.55 * this.rnd(s, 10 + k, 306)), str = 1.7 + 0.7 * this.rnd(s, 20 + k, 307), L = 2 * H / str; // rise = str * L / 2 = H
+          const H = this.stepH(this.rnd(s, 10 + k, 306), this.rnd(s, 40 + k, 309)), str = 1.7 + 0.7 * this.rnd(s, 20 + k, 307), L = 2 * H / str; // rise = str * L / 2 = H
           for (let i = Math.max(0, Math.floor(pos / STEP)); i < Math.min(n, Math.ceil((pos + L) / STEP)); i++) sl[i] = 0.04; // a step is as tall as it says, not plus the ordinary slope
           rise(sl, pos, L, str); list.push({ s, k, a: pos, L }); pos += L; const le = 6 + 12 * this.rnd(s, 30 + k, 308); ledges.push([pos, pos + le]); pos += le;
         }
@@ -102,6 +111,7 @@ export class Terrain {
   height(x, z) { // raw terrain, flattened under the house, with lake basins carved in
     let h = this.rawHeight(x, z); const dh = Math.hypot(x - HOUSE.x, z - HOUSE.z);
     if (dh < 34) h = this.h0 + (h - this.h0) * ss(14, 34, dh);
+    if (this.scn) h = padHeight(this, x, z, h);
     const i0 = Math.floor(x / LAKE_CELL), j0 = Math.floor(z / LAKE_CELL);
     for (let i = i0 - 1; i <= i0 + 1; i++) for (let j = j0 - 1; j <= j0 + 1; j++) {
       const lk = this.lakeCell(i, j); if (!lk) continue; const d = Math.hypot(x - lk.x, z - lk.z); if (d >= lk.R * 1.5) continue;
@@ -109,6 +119,7 @@ export class Terrain {
     }
     return h;
   }
+  siteSeg(li, s) { return siteSeg(this, li, s) } allSites(d0, d1) { return allSites(this, d0, d1) } sitesNear(x, z, r) { return sitesNear(this, x, z, r) } siteClear(x, z) { return siteClear(this, x, z) } spawnDef(id) { return spawnDef(this, id) }
   lakeCell(i, j) {
     const key = i * 131071 + j; if (this.lakes.has(key)) return this.lakes.get(key);
     let lk = null;

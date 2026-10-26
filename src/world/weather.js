@@ -1,5 +1,5 @@
 // Weather as pure math: a timeline that depends only on (seed, time), so everyone in a room sees the same sky as long as their clocks roughly agree.
-// Time is wall-clock seconds. The sky (clouds, fog, light) is global; precipitation also depends on where you are, so rain comes in cells you can walk out of.
+// Time is the world's game clock in seconds (see main.js); the first period is always clear so a new world starts bright. The sky (clouds, fog, light) is global; precipitation also depends on where you are, so rain comes in cells you can walk out of.
 // Rain turns to snow with altitude. Gameplay (slippery rock, cold, wind pushing you) will read the same numbers later: see `at()`.
 import { hashSeed } from './terrain.js';
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t) };
@@ -14,7 +14,7 @@ export class Weather {
   constructor(seed) { this.seed = hashSeed(seed + ':weather'); this.force = null } // force: a TYPES name (or 'snow') to test a look from the console
   rnd(i, k = 0) { let h = (Math.imul(i | 0, 374761393) + Math.imul(this.seed + k, 668265263)) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296 }
   noise(x, k = 0) { const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f); return this.rnd(i, k) * (1 - u) + this.rnd(i + 1, k) * u }
-  typeOf(i) { let r = this.rnd(i, 1); for (const [n, w] of ORDER) { if ((r -= w) < 0) return n } return 'clear' }
+  typeOf(i) { if (i <= 0) return 'clear'; let r = this.rnd(i, 1); for (const [n, w] of ORDER) { if ((r -= w) < 0) return n } return 'clear' }
   base(time) { // the global conditions at this moment
     if (this.force) { const f = this.force === 'snow' ? TYPES.rain : TYPES[this.force]; if (f) return { ...f } }
     const i = Math.floor(time / PERIOD), u = ss(.7, 1, time / PERIOD - i), a = TYPES[this.typeOf(i)], b = TYPES[this.typeOf(i + 1)], o = {};
@@ -29,7 +29,7 @@ export class Weather {
     return { type: this.force || this.typeOf(Math.floor(time / PERIOD)), cover: b.cover, fog: b.fog * (1 - .5 * (1 - cell) * Math.min(1, b.precip * 3)), rain: precip * (1 - snowK), snow: precip * snowK, storm: b.storm * cell, wind: [Math.cos(wa) * ws, Math.sin(wa) * ws], gust: ws };
   }
   ground(time) { // how wet and how snowy the mountain is right now, from the recent past: same for everyone, and already right the moment you join
-    let wet = 0, snow = 0; for (let a = 0; a <= 1200; a += 20) wet += this.base(time - a).precip * Math.exp(-a / 300) * 20 / 300; for (let a = 0; a <= 3000; a += 50) snow += this.base(time - a).precip * Math.exp(-a / 900) * 50 / 900;
+    let wet = 0, snow = 0; for (let a = 0; a <= 1200; a += 20) wet += (time - a >= 0 ? this.base(time - a).precip : 0) * Math.exp(-a / 300) * 20 / 300; for (let a = 0; a <= 3000; a += 50) snow += (time - a >= 0 ? this.base(time - a).precip : 0) * Math.exp(-a / 900) * 50 / 900;
     return { wet: Math.min(1, wet * 1.3), snow: Math.min(1, snow * 1.1) };
   }
   flash(time, storm) { // lightning: 0..1 brightness; a few hits a minute in a storm, the same for everyone

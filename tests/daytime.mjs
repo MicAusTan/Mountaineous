@@ -9,4 +9,4 @@ console.log('sun above horizon', (100 * dayS / DAY_LENGTH).toFixed(1) + '%', '| 
 for (const h of [3, 6, 9, 13, 18, 21, 23]) { d.setClock(h, T); const a = d.at(T); console.log(String(h).padStart(2), 'h: sun', a.sinE.toFixed(2), 'day', a.day.toFixed(2), 'dusk', a.dusk.toFixed(2), 'night', a.night.toFixed(2), 'horizon', a.horizon.map(v => v.toFixed(2)).join(','), 'light', a.lightI.toFixed(2), a.sunUp ? 'sun' : 'moon') }
 // light direction continuity at the sun/moon switch
 let worst = 0; for (let s = 1; s < DAY_LENGTH; s++) { const a = d.at(T + s - 1), b = d.at(T + s); worst = Math.max(worst, Math.abs(a.lightI - b.lightI)) } console.log('largest 1-second change in light strength:', worst.toFixed(3));
-console.log('different worlds start at different times:', ['a', 'b', 'c', 'd'].map(s => new Daytime(s).clock(T)).join(' '));
+console.log('every world starts at:', ['a', 'b'].map(s => new Daytime(s).clock(0)).join(' '));
