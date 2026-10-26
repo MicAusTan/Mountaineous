@@ -106,7 +106,7 @@ function launch(cfg, joined) {
   const hotbar = () => { const sig = sel + '|' + torchOn + '|' + inv.join(); if (sig === hbSig) return; hbSig = sig; bar.innerHTML = inv.map((it, i) => `<div class="${i === sel ? 'on' : ''}${i === sel && (it === 'flashlight' || it === 'lantern') && torchOn ? ' lit' : ''}"><b>${i + 1}</b>${it ? ITEMS[it].icon : ''}</div>`).join(''); hn.textContent = held() ? ITEMS[held()].name + ((held() === 'flashlight' || held() === 'lantern') ? (torchOn ? ' (on)' : ' (off)') : '') + ' \u00b7 ' + ITEMS[held()].verb + (ITEMS[held()].climbOk ? '' : ' \u00b7 put it away (its number) to climb') : ''; hn.style.display = held() ? 'block' : 'none' };
   const equip = (i) => { sel = i === sel || !inv[i] ? -1 : i; torchOn = zoomOn = false; hbSig = '' };
   addEventListener('keydown', (e) => { if (document.pointerLockElement !== canvas || player.frozen || e.repeat) return;
-    if (['Digit1', 'Digit2', 'Digit3'].includes(e.code)) equip(+e.code.slice(5) - 1);
+    if (['Digit1', 'Digit2', 'Digit3'].includes(e.code)) equip(+e.code.slice(5) - 1) });
   addEventListener('wheel', (e) => { if (document.pointerLockElement !== canvas || player.frozen) return; if (zoomOn) zoomT = Math.max(2, Math.min(10, zoomT * (e.deltaY < 0 ? 1.15 : 1 / 1.15))); else { const o = [-1, 0, 1, 2], n = o[(o.indexOf(sel) + (e.deltaY > 0 ? 1 : 3)) % 4]; sel = n >= 0 && !inv[n] ? -1 : n; torchOn = false; hbSig = '' } }); // wheel: zoom while using binoculars, otherwise switch item
   bar.style.display = 'flex'; hotbar();
   // Things on the ground: E picks up, Q drops (tap) or throws (hold, release: the meter shows how hard). The host decides who gets an item, so two friends can't both take it.
