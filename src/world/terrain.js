@@ -1,6 +1,7 @@
 // Pure math: same seed + length (+ generator version) => same mountain on every client.
 import { placeFeatures, FCS } from './features.js';
 import { siteSeg, sitesNear, padHeight, siteClear, spawnDef, allSites } from './sites.js';
+import { trailDist, trailXs } from './trails.js';
 export const HOUSE = { x: 25, z: -15 };   // starter house, on a flattened pad
 export const LAKE_CELL = 500;             // lakes are seeded one-per-cell
 const STEP = 2, STEP_CAP = 30, ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t) };
@@ -9,7 +10,7 @@ export function hashSeed(s) { s = String(s); let h = 2166136261; for (let i = 0;
 export class Terrain {
   // o.climb 0..1: how often climbing sections appear; o.step: how tall cliff steps are in general (sv 2: the typical height, single steps vary from about half to over twice that, hard cap STEP_CAP; sv 1, saved worlds: the tallest step, max 18); o.lakes: lake chance per cell
   constructor(seed, length = 20000, o = {}) {
-    this.seed = hashSeed(seed); this.length = length; this.climb = o.climb ?? 0.5; this.sv = o.sv ?? 1; this.scn = o.scn ?? 0; this.sf = o.sf ?? 1; this.cv = o.cv ?? 0; /* scn: sites along the trail (sites.js), sf: how often (0 = none), cv: caves (features.js); older worlds have none of them */ this.step = o.step ?? 12; this.stepMax = this.sv >= 2 ? this.step : Math.min(this.step, 18); this.lakeP = o.lakes ?? 0.2;
+    this.seed = hashSeed(seed); this.length = length; this.climb = o.climb ?? 0.5; this.sv = o.sv ?? 1; this.scn = o.scn ?? 0; this.sf = o.sf ?? 1; this.cv = o.cv ?? 0; this.tr = o.tr ?? 0; this.trl = new Map(); /* tr: side trails (trails.js) and deep swimmable lakes; older worlds have neither */ /* scn: sites along the trail (sites.js), sf: how often (0 = none), cv: caves (features.js); older worlds have none of them */ this.step = o.step ?? 12; this.stepMax = this.sv >= 2 ? this.step : Math.min(this.step, 18); this.lakeP = o.lakes ?? 0.2;
     this.gen = o.gen ?? 1; this.featP = o.featP ?? 0.8; this.freeP = o.freeP ?? (o.cv ? 0.05 : 0.025); /* featP: chance a cell gets an overhang; freeP: chance it gets an arch or spires instead */ this.house = HOUSE; this.fcache = new Map(); this.fnear = { key: null, list: [] }; // gen 1 = original mountain, gen 2 = adds 3D rock features
     this.STEP = STEP; this.startFlat = 250; this.lakes = new Map(); this.buildProfile(); this.h0 = this.rawHeight(HOUSE.x, HOUSE.z);
   }
@@ -105,7 +106,7 @@ export class Terrain {
   rawHeight(x, z) {
     const t = this.progress(z), zs = z + (this.fbm(x / 80, z / 160, 77, 3) - 0.44) * 60, base = this.baseHeight(zs, x); // zs: cliff lines wander and run diagonally, so they're never the same
     const rough = (this.fbm(x / 160, z / 160, 3) - 0.5) * 2 * (20 + 90 * t) * Math.min(1, t * 8) + (this.fbm(x / 30, z / 30, 20) - 0.5) * 6;
-    const pathMask = Math.max(0, 1 - Math.abs(x - this.pathX(z)) / 40);
+    const pathMask = Math.max(0, 1 - trailDist(this, x, z) / 40);
     return base + rough * (1 - pathMask * 0.85);
   }
   height(x, z) { // raw terrain, flattened under the house, with lake basins carved in
@@ -115,7 +116,7 @@ export class Terrain {
     const i0 = Math.floor(x / LAKE_CELL), j0 = Math.floor(z / LAKE_CELL);
     for (let i = i0 - 1; i <= i0 + 1; i++) for (let j = j0 - 1; j <= j0 + 1; j++) {
       const lk = this.lakeCell(i, j); if (!lk) continue; const d = Math.hypot(x - lk.x, z - lk.z); if (d >= lk.R * 1.5) continue;
-      const m = 1 - ss(0.9 * lk.R, 1.5 * lk.R, d); h = h * (1 - m) + (lk.L - 1.6 * Math.max(0, 1 - (d / lk.R) ** 2)) * m;
+      const m = 1 - ss(0.9 * lk.R, 1.5 * lk.R, d); h = h * (1 - m) + (lk.L - (this.tr ? 3.4 : 1.6) * Math.max(0, 1 - (d / lk.R) ** 2)) * m;
     }
     return h;
   }
@@ -125,7 +126,7 @@ export class Terrain {
     let lk = null;
     if (this.rnd(i, j, 400) < this.lakeP) {
       const x = (i + 0.2 + 0.6 * this.rnd(i, j, 401)) * LAKE_CELL, z = (j + 0.2 + 0.6 * this.rnd(i, j, 402)) * LAKE_CELL, R = 35 + 60 * this.rnd(i, j, 403);
-      if (z < -200 && this.progress(z) < 0.995 && Math.abs(x - this.pathX(z)) > R + 20 && Math.abs(this.rawHeight(x, z - R) - this.rawHeight(x, z + R)) < R * 0.8)
+      if (z < -200 && this.progress(z) < 0.995 && (this.tr ? Math.min(trailDist(this, x, z - R), trailDist(this, x, z), trailDist(this, x, z + R)) : Math.abs(x - this.pathX(z))) > R + 20 && Math.abs(this.rawHeight(x, z - R) - this.rawHeight(x, z + R)) < R * 0.8)
         lk = { x, z, R, L: this.rawHeight(x, z) - 0.6 };
     }
     this.lakes.set(key, lk); return lk;
@@ -140,7 +141,8 @@ export class Terrain {
     for (let i = i0 - 1; i <= i0 + 1; i++) for (let j = j0 - 1; j <= j0 + 1; j++) { const lk = this.lakeCell(i, j); if (lk) s = Math.max(s, 1 - ss(lk.R * 0.85, lk.R * 1.3, Math.hypot(x - lk.x, z - lk.z))) }
     return s;
   }
-  onPath(x, z) { const d = Math.abs(x - this.pathX(z)); return Math.max(0, Math.min(1, 1 - (d - 3) / 3)) }
+  trailDist(x, z) { return trailDist(this, x, z) } trailXs(z) { return trailXs(this, z) } // distance to the nearest trail (main or side), and the x of every trail at z
+  onPath(x, z) { const d = trailDist(this, x, z); return Math.max(0, Math.min(1, 1 - (d - 3) / 3)) }
   // Biomes come from noise; altitude only nudges the odds, so any biome can appear at any height.
   biomeScores(x, z, h = this.height(x, z)) {
     const alt = Math.min(1, h / this.peak), n = (k) => this.fbm(x / 500, z / 500, 50 + k * 10, 3), a = Math.abs;

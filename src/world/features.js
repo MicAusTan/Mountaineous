@@ -47,14 +47,14 @@ function bound(prims) { // box around all primitives, with a margin for the rock
   const M = 2.5; return [b[0] - M, b[1] - M, b[2] - M, b[3] + M, b[4] + M, b[5] + M];
 }
 function offTrail(t, bb) { // the trail stays free: no feature's footprint comes within 6 m of the path's centre line
-  for (let z = bb[2]; z <= bb[5] + 1; z += 2) { const px = t.pathX(z); if (px > bb[0] - 6 && px < bb[3] + 6) return false } return true;
+  for (let z = bb[2]; z <= bb[5] + 1; z += 2) for (const px of t.trailXs(z)) if (px > bb[0] - 6 && px < bb[3] + 6) return false; return true;
 }
 // Freestanding rock on gentle ground off the trail: arches (walk through, stand on top) and spire clusters (climb them). Rarer than overhangs.
 function placeFree(t, cx, cz, R) {
   const ox = cx * FCS, oz = cz * FCS;
   for (let a = 0; a < 3; a++) {
     const o = 100 + a * 30, x = ox + 8 + R(o + 1) * (FCS - 16), z = oz + 8 + R(o + 2) * (FCS - 16);
-    if (t.progress(z) < .03 || Math.abs(x - t.pathX(z)) < 18 || Math.hypot(x - t.house.x, z - t.house.z) < 45 || t.waterAt(x, z) !== null || t.shore(x, z) > .02 || t.stepAt(x, z)) continue;
+    if (t.progress(z) < .03 || t.trailDist(x, z) < 18 || Math.hypot(x - t.house.x, z - t.house.z) < 45 || t.waterAt(x, z) !== null || t.shore(x, z) > .02 || t.stepAt(x, z)) continue;
     const g = Math.hypot(t.height(x + 2, z) - t.height(x - 2, z), t.height(x, z + 2) - t.height(x, z - 2)) / 4; if (g > 1) continue;
     const prims = []; let kind;
     if (t.cv && R(o + 3) < .55) { // cave: a rock mound with a tunnel and a round chamber carved out of it; the entrance faces the trail
@@ -97,7 +97,7 @@ function placeBase(t, cx, cz) {
   if (R(0) > t.featP) return out;
   for (let a = 0; a < 6; a++) {
     const o = a * 40, x = ox + R(o + 1) * FCS, z = oz + R(o + 2) * FCS;
-    if (t.progress(z) < 0.03 || Math.abs(x - t.pathX(z)) < 16 || Math.hypot(x - t.house.x, z - t.house.z) < 45 || t.waterAt(x, z) !== null) continue;
+    if (t.progress(z) < 0.03 || t.trailDist(x, z) < 16 || Math.hypot(x - t.house.x, z - t.house.z) < 45 || t.waterAt(x, z) !== null) continue;
     const gx = (t.height(x + 2, z) - t.height(x - 2, z)) / 4, gz = (t.height(x, z + 2) - t.height(x, z - 2)) / 4, g = Math.hypot(gx, gz);
     if (g < 1.0 || g > 3) continue; // needs a real slope, but not a smooth sheer wall
     const st = t.stepAt(x, z); if (st && st.sheer) continue; // never on a sheer step: a shelf there could cover the one climbable gap
@@ -162,15 +162,22 @@ export function topSurface(t, x, z, feet) { // top of feature rock under (x,z) t
 }
 // Something to hold within arm's reach of the body centre. Never an underside (ceiling rule), never flat ground (you just walk there).
 // Ceilings only: a wall leaning out up to ~44 degrees (normal.y -.7) can still be grabbed, and held to ~51 degrees (-.78); only a real roof can't.
-export function grip(t, x, cy, z, was = false) { // `was`: already holding on, so a small bump or lean in the face doesn't throw you off
+function grip1(t, x, cy, z, was) {
   const d = solidD(t, x, cy, z); if (d >= 1) return null;
   const n = normalAt(t, x, cy, z); if (n[1] < (was ? -.78 : -.7) || n[1] > .97) return null; return { n, d };
+}
+const PROBES = [[0, .8, 0], [.9, 0, 0], [-.9, 0, 0], [0, 0, .9], [0, 0, -.9], [.7, .7, 0], [-.7, .7, 0], [0, .7, .7], [0, .7, -.7], [0, 1.5, 0], [0, -.7, 0]];
+export function grip(t, x, cy, z, was = false) { // `was`: already holding on. A small bulge or ceiling-ish patch must not throw you off when good rock is right next to it, so look around for something holdable and move toward it
+  const g = grip1(t, x, cy, z, was); if (g || !was) return g;
+  for (const o of PROBES) { const q = grip1(t, x + o[0], cy + o[1], z + o[2], true); if (q) { q.pull = o; return q } }
+  return null;
 }
 // Climb along the real surface: W goes "up" the face, A/D go sideways, then the body is pressed back to 0.55 m from the rock.
 export function climbMove(t, c, g, f, s, yaw, speed, dt) {
   const n = g.n; let ux = -n[0] * n[1], uy = 1 - n[1] * n[1], uz = -n[2] * n[1]; const ul = Math.hypot(ux, uy, uz) || 1; ux /= ul; uy /= ul; uz /= ul;
   const rx = Math.cos(yaw), rz = -Math.sin(yaw), rd = rx * n[0] + rz * n[2]; let tx = rx - n[0] * rd, ty = -n[1] * rd, tz = rz - n[2] * rd; const tl = Math.hypot(tx, ty, tz) || 1; tx /= tl; ty /= tl; tz /= tl;
   const len = Math.hypot(f, s) || 1; let x = c[0] + (ux * f + tx * s) / len * speed * dt, y = c[1] + (uy * f + ty * s) / len * speed * dt, z = c[2] + (uz * f + tz * s) / len * speed * dt;
+  if (g.pull) { const k = Math.min(1, dt * 3); x += g.pull[0] * k; y += g.pull[1] * k; z += g.pull[2] * k } /* slide toward the holdable patch next to a bad spot */
   for (let i = 0; i < 2; i++) { const d = solidD(t, x, y, z); if (d > 1.5) break; const m = normalAt(t, x, y, z); x += m[0] * (.55 - d); y += m[1] * (.55 - d); z += m[2] * (.55 - d) }
   return [x, y, z];
 }

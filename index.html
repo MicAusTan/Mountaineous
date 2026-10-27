@@ -18,12 +18,13 @@ html,body{margin:0;height:100%;overflow:hidden;font-family:system-ui,sans-serif;
 #hotbar div.on{border-color:var(--accent);background:rgba(40,30,12,.8)}#hotbar div.lit{box-shadow:0 0 12px #ffd27d}
 #hotbar b{position:absolute;left:4px;top:1px;font-size:11px;font-weight:600;opacity:.8}
 #hotname{display:none;position:fixed;left:50%;bottom:78px;transform:translateX(-50%);font-size:13px;text-shadow:0 1px 3px #000a;pointer-events:none}
-#binos{display:none;position:fixed;inset:0;pointer-events:none;background:radial-gradient(circle at 50% 50%,transparent 0,transparent 30%,#000 31%);}
+#underwater{display:none;position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse 80% 75% at 50% 50%,rgba(20,110,130,.28),rgba(4,45,64,.72));}
+#binos{display:none;position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse 54% 45% at 50% 50%,transparent 0,transparent 88%,rgba(0,0,0,.55) 95%,#000 100%);}
 #prompt{display:none;position:fixed;left:50%;bottom:112px;transform:translateX(-50%);padding:4px 10px;border-radius:5px;background:rgba(10,16,24,.65);font-size:14px;pointer-events:none;text-shadow:0 1px 3px #000a}
 #throw{display:none;position:fixed;left:50%;top:58%;transform:translateX(-50%);width:140px;height:10px;border-radius:4px;background:rgba(10,16,24,.7);border:1px solid rgba(255,255,255,.5);overflow:hidden;pointer-events:none}
 #throwFill{height:100%;width:0;background:linear-gradient(90deg,#8fd0ff,#ffd27d,#ff8a60)}
 #zoomv{position:fixed;left:50%;bottom:40px;transform:translateX(-50%);font-size:14px;text-shadow:0 1px 3px #000;display:none;pointer-events:none}
-#hint{display:none;position:fixed;bottom:10px;right:14px;font-size:12px;color:#fff;opacity:.8;text-align:right;text-shadow:0 1px 3px #000a;pointer-events:none}
+#hint{display:none;position:fixed;bottom:10px;right:14px;max-width:30vw;font-size:12px;color:#fff;opacity:.8;transition:opacity 1.2s;text-align:right;text-shadow:0 1px 3px #000a;pointer-events:none}
 #nav{display:none;position:fixed;top:12px;left:50%;transform:translateX(-50%);text-align:center;font-size:12px;text-shadow:0 1px 3px #000a;pointer-events:none}
 #arrow{display:block;font-size:26px;line-height:1;color:var(--accent)}
 /* energy bar: bottom left; afflictions (hunger, cold, poison...) eat into the right-hand end of it */
@@ -76,9 +77,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 </style></head><body>
 <canvas id="c"></canvas><div id="hud"></div>
 <div id="energy"><div id="ebar"><i id="efill"></i><div id="eaff"></div></div><div id="ereserve"><i></i></div><span id="elabel">Energy</span><span id="ewhy"></span></div>
-<div id="hotbar"></div><div id="hotname"></div><div id="binos"></div><div id="prompt"></div><div id="use"><div id="useFill"></div></div><div id="throw"><div id="throwFill"></div></div><div id="zoomv"></div>
-<div id="nav"><span id="arrow">&#9650;</span><small>trail</small></div>
-<div id="hint">1-3: items · Left click: use the held item (hold to confirm), or grab / climb with empty hands · E: pick up / rest · Q: drop (hold to throw) · G: emotes · R: ragdoll · Right click: reach out</div>
+<div id="hotbar"></div><div id="hotname"></div><div id="binos"></div><div id="underwater"></div><div id="prompt"></div><div id="use"><div id="useFill"></div></div><div id="throw"><div id="throwFill"></div></div><div id="zoomv"></div>
+<div id="nav"><span id="arrow">&#9650;</span><small>summit</small></div>
+<div id="hint">1-4: items · Left click: use the held item (hold to confirm), or grab / climb with empty hands · E: pick up / rest · Q: drop (hold to throw) · G: emotes · R: ragdoll · Right click: reach out · Deep water: swim, hold C to dive</div>
 <div id="wheel"><svg id="wsvg" viewBox="0 0 320 320" width="320" height="320"></svg><div id="wnav"><button data-page="-1" aria-label="Previous page">&#8249;</button><span id="wpage"></span><button data-page="1" aria-label="Next page">&#8250;</button></div><div id="whint">Right-click &ldquo;Picture&rdquo; to change its image</div></div><div id="wcur"></div>
 <div id="menu" class="screen"><div class="card">
   <h1>Mountain</h1><p class="sub">Walk to the summit. Bring friends.</p>
@@ -117,6 +118,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
   <div class="row"><label for="vol">Sound volume: <span id="volV"></span></label><input id="vol" type="range" min="0" max="1" step="0.05"></div>
   <div class="row"><label for="sens">Mouse sensitivity: <span id="sensV"></span>&times;</label><input id="sens" type="range" min="0.2" max="3" step="0.1"></div>
   <div class="row"><label for="vd">View distance: <span id="vdV"></span> chunks</label><input id="vd" type="range" min="3" max="14"></div>
+  <div class="row"><label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input id="sway" type="checkbox" style="width:auto"> Wind sway (trees, bushes, grass)</label></div>
   <div class="row"><label for="gfx">Graphics</label><select id="gfx"><option value="0">Plain</option><option value="1">Soft (smoothing + color)</option><option value="2">Glow (+ bloom)</option></select></div>
   <button id="toCp" class="sub">Return to last checkpoint</button>
   <button class="go" id="resume">Resume</button>

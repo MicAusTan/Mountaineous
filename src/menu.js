@@ -45,7 +45,7 @@ export function initMenu(onStart, onJoin) {
       const row = document.createElement('div'); row.className = 'world'; const pct = w.pos ? Math.round(Math.max(0, -w.pos.z) / w.length * 100) : 0;
       row.innerHTML = `<div><b>${esc(w.name)}</b><small>${pct}% up · ${sizeName(w.length)} · seed ${esc(w.seed)}</small><small>played ${ago(w.played)}</small></div><button class="play">Play</button><button class="del" aria-label="Delete world">&#10005;</button>`;
       row.querySelector('.play').onclick = () => { patchWorld(w.id, { played: Date.now() });
-        begin({ gen: w.gen || 1, sv: w.sv || 1, scn: w.scn || 0, sf: w.sf ?? 1, cv: w.cv || 0, hunger: w.hunger ?? 1, hv: w.hv, wt: w.wt, inv: w.inv, items: w.items, used: w.used, cp: w.cp, seed: w.seed, length: w.length, climb: w.climb, step: w.step, grab: w.grab, joinSpawn: w.joinSpawn, open: w.open, radius: +$('dist').value, worldId: w.id, start: w.pos }) };
+        begin({ gen: w.gen || 1, sv: w.sv || 1, scn: w.scn || 0, sf: w.sf ?? 1, cv: w.cv || 0, tr: w.tr || 0, hunger: w.hunger ?? 1, hv: w.hv, wt: w.wt, inv: w.inv, items: w.items, used: w.used, cp: w.cp, seed: w.seed, length: w.length, climb: w.climb, step: w.step, grab: w.grab, joinSpawn: w.joinSpawn, open: w.open, radius: +$('dist').value, worldId: w.id, start: w.pos }) };
       row.querySelector('.del').onclick = () => { if (confirm(`Delete "${w.name}"? This can't be undone.`)) { delWorld(w.id); renderWorlds() } };
       $('wlist').append(row);
     }
@@ -56,7 +56,7 @@ export function initMenu(onStart, onJoin) {
   });
   renderWorlds();
   $('go').onclick = () => {
-    const c = { gen: 2, sv: 2, scn: 1, cv: 1, sf: +$('sites').value, hunger: +$('hunger').value, hv: .08, wt: 0, seed: $('seed').value.trim() || rid(), length: cfg.length, climb: $('climbR').value / 100, step: +$('step').value, grab: $('grab').value, joinSpawn: $('spawn').value, open: $('open').checked, radius: +$('dist').value };
+    const c = { gen: 2, sv: 2, scn: 1, cv: 1, tr: 1, sf: +$('sites').value, hunger: +$('hunger').value, hv: .08, wt: 0, seed: $('seed').value.trim() || rid(), length: cfg.length, climb: $('climbR').value / 100, step: +$('step').value, grab: $('grab').value, joinSpawn: $('spawn').value, open: $('open').checked, radius: +$('dist').value };
     const w = { id: Date.now().toString(36) + rid(), name: $('wname').value.trim() || `World ${loadWorlds().length + 1}`, ...c, created: Date.now(), played: Date.now(), pos: null };
     delete w.radius; addWorld(w); begin({ ...c, worldId: w.id, start: null });
   };

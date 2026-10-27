@@ -1,5 +1,6 @@
 import { BIOME_COLORS, HOUSE, LAKE_CELL } from './terrain.js';
-import { makeProps, DECOR, COLLIDE } from './props.js';
+import { makeProps, DECOR, COLLIDE, TILT } from './props.js';
+import { makeWaterMaterial } from './waterMat.js';
 import { buildSite } from './siteMeshes.js';
 import { makeTerrainMaterial } from './terrainMat.js';
 import { caveShade, featureD, solidD, topSurface, grip, climbMove, pushOut } from './features.js';
@@ -11,11 +12,15 @@ export class Chunks {
   constructor(scene, terrain, radius = 8, env) {
     this.scene = scene; this.t = terrain; this.radius = radius; this.map = new Map(); this.first = true; this.cam = new BABYLON.Vector3();
     this.mat = makeTerrainMaterial(scene, env);
-    this.water = new BABYLON.StandardMaterial('water', scene); this.water.diffuseColor = new BABYLON.Color3(.12, .38, .58); this.water.alpha = .72;
-    this.water.specularColor = new BABYLON.Color3(.5, .5, .5); this.water.specularPower = 48; this.water.backFaceCulling = false;
+    this.water = makeWaterMaterial(scene);
     this.props = makeProps(scene);
   }
-  lodFor(d) { return d <= 2 ? 32 : d <= 4 ? 16 : 8 } // grid segments by chunk distance: far chunks are far cheaper
+  lodFor(d) { return d <= 1 ? 48 : d <= 2 ? 32 : d <= 4 ? 16 : 8 }
+  meshHeight(x, z) { /* height of the drawn terrain mesh (triangles, not the exact height function) at x,z: they differ on steep ground, which is what let the view poke through a wall */
+    const cx = Math.floor(x / CS), cz = Math.floor(z / CS), c = this.map.get(`${cx},${cz}`); if (!c) return null;
+    const N = c.lod, st = CS / N, u = (x - cx * CS) / st, v = (z - cz * CS) / st, i = Math.min(N - 1, Math.floor(u)), j = Math.min(N - 1, Math.floor(v)), fx = u - i, fz = v - j, t = this.t, X = cx * CS + i * st, Z = cz * CS + j * st;
+    const ha = t.height(X, Z), hb = t.height(X + st, Z), hc = t.height(X, Z + st), he = t.height(X + st, Z + st);
+    return fx + fz <= 1 ? ha + fx * (hb - ha) + fz * (hc - ha) : he + (1 - fx) * (hc - he) + (1 - fz) * (hb - he) } // grid segments by chunk distance: far chunks are far cheaper
   build(cx, cz, d) {
     const t = this.t, N = this.lodFor(d), pos = [], lay = [], tin = [], uv = [], idx = [], nor = [], ox = cx * CS, oz = cz * CS, step = CS / N;
     for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) {
@@ -55,14 +60,18 @@ export class Chunks {
     for (let k = 0; k < (d > 6 ? 0 : far ? 24 : 56); k++) {
       const x = ox + t.prnd(cx, cz, 100 + k) * CS, z = oz + t.prnd(cx, cz, 200 + k) * CS;
       if (feat.some(f => x > f.bb[0] && x < f.bb[3] && z > f.bb[2] && z < f.bb[5])) continue; // nothing grows through rock
-      if (Math.abs(x - t.pathX(z)) < 5 || Math.hypot(x - HOUSE.x, z - HOUSE.z) < 9 || t.waterAt(x, z) !== null || (t.scn && t.siteClear(x, z))) continue; // (nothing grows on a hut's pad or across a fallen tree)
+      if (t.trailDist(x, z) < 5 || Math.hypot(x - HOUSE.x, z - HOUSE.z) < 9 || t.waterAt(x, z) !== null || (t.scn && t.siteClear(x, z))) continue; // (nothing grows on a hut's pad or across a fallen tree)
       const h = t.height(x, z), set = DECOR[t.biome(x, z, h)]; if (t.prnd(cx, cz, 300 + k) > set.density) continue;
       let w = t.prnd(cx, cz, 400 + k) * set.total;
       for (const [name, wt, smin, smax] of set.items) {
         if ((w -= wt) > 0) continue; if (far && !COLLIDE[name]) break;
         const s = smin + (smax - smin) * t.prnd(cx, cz, 500 + k), sx = s * (0.85 + 0.3 * t.prnd(cx, cz, 800 + k)), sy = s * (0.8 + 0.5 * t.prnd(cx, cz, 900 + k));
         const m = this.props.P[name + Math.floor(t.prnd(cx, cz, 700 + k) * this.props.V[name])].createInstance('p');
-        m.position.set(x, h - 0.1, z); m.rotation.y = t.prnd(cx, cz, 600 + k) * 6.28; m.scaling.set(sx, sy, sx); m.freezeWorldMatrix(); kids.push(m);
+        m.position.set(x, h - 0.1, z); m.scaling.set(sx, sy, sx); const tl = TILT[name];
+        if (tl) { const q = BABYLON.Quaternion, gx = (t.height(x + 1.2, z) - t.height(x - 1.2, z)) / 2.4, gz = (t.height(x, z + 1.2) - t.height(x, z - 1.2)) / 2.4, ra = (t.prnd(cx, cz, 1300 + k) - .5) * 2, rb = (t.prnd(cx, cz, 1400 + k) - .5) * 2, cap = (v, m2) => Math.max(-m2, Math.min(m2, v)); // lean = a random wobble + some of the slope's own tilt (capped), in world axes; then spin about its own trunk
+          const tx = cap(-Math.atan(gz) * tl[1] + ra * tl[0], .5), tz = cap(Math.atan(gx) * tl[1] + rb * tl[0], .5); m.rotationQuaternion = q.RotationYawPitchRoll(0, tx, tz).multiply(q.RotationAxis(BABYLON.Vector3.Up(), t.prnd(cx, cz, 600 + k) * 6.28)) }
+        else m.rotation.y = t.prnd(cx, cz, 600 + k) * 6.28;
+        m.freezeWorldMatrix(); kids.push(m);
         const cl = COLLIDE[name]; if (cl) circles.push({ x, z, r: cl[0] * sx, top: h + cl[1] * sy, stand: !!cl[2] });
         break;
       }
@@ -70,7 +79,7 @@ export class Chunks {
     if (t.gen >= 2 && d <= 6) for (const f of t.features(cx, cz)) this.rockFeature(f, N, cx, cz, kids, circles); // real 3D overhangs (terrain gen 2)
     if (!far && t.gen < 2) for (let k = 0; k < 6; k++) { // old gen-1 overhangs: loose rock slabs rock slabs jutting out of steep ground, with fallen rubble below. Never on the trail itself.
       const x = ox + t.rnd(cx, cz, 1000 + k) * CS, z = oz + t.rnd(cx, cz, 1100 + k) * CS;
-      if (t.progress(z) < 0.03 || Math.abs(x - t.pathX(z)) < 14 || t.rnd(cx, cz, 1200 + k) > 0.5) continue;
+      if (t.progress(z) < 0.03 || t.trailDist(x, z) < 14 || t.rnd(cx, cz, 1200 + k) > 0.5) continue;
       const g = Math.hypot(t.height(x + 2, z) - t.height(x - 2, z), t.height(x, z + 2) - t.height(x, z - 2)) / 4;
       if (g < 1.15 || t.waterAt(x, z) !== null) continue;
       const h = t.height(x, z), s = 0.9 + 0.8 * t.rnd(cx, cz, 1300 + k), sy = s * (0.8 + 0.4 * t.rnd(cx, cz, 1400 + k)), thick = 1.14 * sy, bottom = h + 3.2 + 1.5 * t.rnd(cx, cz, 1500 + k);
@@ -129,7 +138,7 @@ export class Chunks {
   // Ceiling rule: you can only grab something whose face reaches your body (head above its underside). Overhangs can be walked under and never grabbed from below.
   reach(x, z, feet, r) { for (const o of this.nearby(x, z)) if (o.stand && feet < o.top - .45 && feet + 1.8 > (o.bottom ?? -1e9) && Math.hypot(x - o.x, z - o.z) < o.r + r + .55) return o; return null } // a climbable thing within arm's reach
   update(px, pz, py) { // nearest chunks first, within a small time budget per frame so walking never hitches
-    this.cam.set(px, py, pz); this.mat.setVector3('camPos', this.cam);
+    this.cam.set(px, py, pz); this.mat.setVector3('camPos', this.cam); this.mat.setFloat('time', (performance.now() / 1000) % 3600); this.water.setVector3('camPos', this.cam); this.water.setFloat('time', (performance.now() / 1000) % 3600); if (this.props.sway) { this.props.sway.t = (performance.now() / 1000) % 3600; this.props.sway.amp = this.windAmp ?? .5 }
     const pcx = Math.floor(px / CS), pcz = Math.floor(pz / CS), keep = new Set(), want = [], r = this.radius;
     for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
       const key = `${pcx + dx},${pcz + dz}`, d = Math.max(Math.abs(dx), Math.abs(dz)), c = this.map.get(key); keep.add(key);

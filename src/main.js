@@ -20,7 +20,7 @@ const AFF = { hunger: '#e3b341', cold: '#5fb0ff', poison: '#8bd450', injury: '#e
 function launch(cfg, joined) {
   if (!joined && q.get('seed')) cfg.seed = q.get('seed'); if (!joined && q.get('length')) cfg.length = +q.get('length'); if (!joined && q.get('gen')) cfg.gen = +q.get('gen'); // ?gen=1 plays the original mountain // ?seed= &length= still work
   window.gameConfig = cfg; const myName = playerName(), opts = Object.assign({ fov: 75, sens: 1, vol: .5 }, JSON.parse(localStorage.getItem('mountain:opts') || '{}'));
-  const terrain = new Terrain(cfg.seed, cfg.length, { climb: cfg.climb, step: cfg.step, gen: cfg.gen || 1, sv: cfg.sv || 1, scn: cfg.scn || 0, sf: cfg.sf ?? 1, cv: cfg.cv || 0 }), engine = new BABYLON.Engine(canvas, true), scene = new BABYLON.Scene(engine);
+  const terrain = new Terrain(cfg.seed, cfg.length, { climb: cfg.climb, step: cfg.step, gen: cfg.gen || 1, sv: cfg.sv || 1, scn: cfg.scn || 0, sf: cfg.sf ?? 1, cv: cfg.cv || 0, tr: cfg.tr || 0 }), engine = new BABYLON.Engine(canvas, true), scene = new BABYLON.Scene(engine);
   const sun = new BABYLON.Vector3(...SUN_DIR), hz = new BABYLON.Color3(...HORIZON);
   scene.clearColor = new BABYLON.Color4(...HORIZON, 1); scene.fogMode = BABYLON.Scene.FOGMODE_LINEAR; scene.fogColor = hz; // clear up close, fades into the horizon color near the edge
   const sunLight = new BABYLON.DirectionalLight('sun', sun.scale(-1), scene), hemi = new BABYLON.HemisphericLight('amb', new BABYLON.Vector3(0, 1, 0), scene); hemi.intensity = .55;
@@ -33,7 +33,7 @@ function launch(cfg, joined) {
   // Weather: fog distance and color, light, sky and ground shaders all follow one smoothed state (see weather.js). Fog thickness shrinks the view distance.
   let curR = cfg.radius, fogK = 1; const fogR = new BABYLON.Vector2(view0 * .55, view0 * .97);
   const setFog = () => { const v = curR * 64; scene.fogStart = v * .55 * fogK; scene.fogEnd = v * .97 * fogK; fogR.set(scene.fogStart, scene.fogEnd) };
-  const applyRadius = (r) => { chunks.radius = curR = r; setFog() }; chunks.mat.setVector2('fogRange', fogR);
+  const applyRadius = (r) => { chunks.radius = curR = r; setFog() }; chunks.mat.setVector2('fogRange', fogR); chunks.water.setVector2('fogRange', fogR);
   applyRadius(cfg.radius);
   const weather = new Weather(cfg.seed), precip = makePrecip(scene), ws = { cover: 0, fog: 0, rain: 0, snow: 0, storm: 0, wind: [0, 0], wet: 0, snowCover: 0, shelter: 0, soak: 0, cold: 0, pv: [0, 0] }, amb = makeAmbience(), shelterFn = (x, z) => shelterTop(terrain, x, z); let gnd = { wet: 0, snow: 0 }, gAt = -1e9, lastFl = 0;
   chunks.mat.setFloat('peakH', terrain.peak); for (const ev of ['pointerdown', 'keydown']) addEventListener(ev, () => amb.start());
@@ -42,6 +42,7 @@ function launch(cfg, joined) {
   const daytime = new Daytime(cfg.seed), V3 = () => new BABYLON.Vector3(), vSun = V3(), vCol = V3(), vAmb = V3(), vSky = V3(), vMoon = V3(), vZen = V3(), vCloud = V3(); // reused every frame
   if (q.get('time')) daytime.setClock(+q.get('time'), gt); window.daytime = daytime; window.setTime = (h) => { daytime.setClock(+h, gt); return daytime.clock(gt) }; // console: setTime(22) jumps to 22:00 (local only); ?time=22 in the URL
   if (q.get('weather')) weather.force = q.get('weather'); window.weather = weather; window.setWeather = (n) => { weather.force = n && n !== 'auto' ? n : null; return weather.force || 'auto' }; // console: setWeather('storm' | 'rain' | 'snow' | 'fog' | 'cloudy' | 'clear' | 'auto')
+  let uwK = 0; const uwEl = $('underwater');
   const weatherStep = (dt, p, now) => {
     const T = daytime.at(now); // time of day: sun, moon, sky colors, darkness
     const alt = Math.max(0, Math.min(1, (p.y - 1.7) / terrain.peak)), w = weather.at(p.x, p.z, now, alt), a = Math.min(1, dt * .5), ss = (x0, x1, x) => { const t = Math.max(0, Math.min(1, (x - x0) / (x1 - x0))); return t * t * (3 - 2 * t) };
@@ -50,7 +51,7 @@ function launch(cfg, joined) {
     ws.wet += (gnd.wet - ws.wet) * Math.min(1, dt * .3); ws.snowCover += (gnd.snow - ws.snowCover) * Math.min(1, dt * .3);
     const under = terrain.gen >= 2 && shelterTop(terrain, p.x, p.z) > p.y; // rock overhead: out of the rain
     ws.shelter += ((under ? 1 : 0) - ws.shelter) * Math.min(1, dt * 3); precip.shelter = terrain.gen >= 2 && terrain.featuresNear(p.x, p.z).length ? shelterFn : null;
-    const rainy = ws.rain + ws.snow * .5 > .05 && !under; ws.soak += ((rainy ? 1 : 0) - ws.soak) * Math.min(1, dt * (rainy ? .1 : .03)); // you get wet in rain and dry off under rock (nothing uses this yet: it's the hook for cold)
+    const rainy = ws.rain + ws.snow * .5 > .05 && !under; const swim = player.swimming; ws.soak += ((rainy || swim ? 1 : 0) - ws.soak) * Math.min(1, dt * (swim ? .4 : rainy ? .1 : .03)); // swimming soaks you through (and so makes you cold) within a few seconds; // you get wet in rain and dry off under rock (nothing uses this yet: it's the hook for cold)
     // Cold: builds with altitude, night, being wet and wind; eases off in sun, under rock and lower down. It reserves part of your maximum energy (the blue segment of the bar), like PEAK.
     const nightC = .12 * T.night * (.3 + .7 * Math.pow(alt, .6)); // night chills mostly up high; down on the meadow it's barely noticeable
     const gm = Math.hypot(ws.wind[0], ws.wind[1]), exposed = under ? 0 : 1, coldT = 100 * Math.min(.55, Math.max(0, .22 * Math.pow(alt, 1.2) + nightC + .22 * ws.soak + .08 * Math.min(1, gm / 10) * exposed + .05 * ws.snow - (under ? .03 : .1 * T.day * (1 - ws.cover)) - (ws.warm || 0)));
@@ -68,14 +69,23 @@ function launch(cfg, joined) {
     const sunAmt = T.lightI * Math.max(.08, 1 - .8 * ws.cover - .12 * ws.storm) + fl * .8; sunLight.intensity = sunAmt; sunLight.direction.set(-T.lightDir[0], -T.lightDir[1], -T.lightDir[2]); sunLight.diffuse.set(T.sunCol[0], T.sunCol[1], T.sunCol[2]);
     hemi.intensity = .55 * (1 - .22 * ws.cover) + fl * 1.1; hemi.diffuse.set(T.ambCol[0] / .42, T.ambCol[1] / .46, T.ambCol[2] / .55); // props and avatars: colored ambient carries the darkness at night
     const m = chunks.mat; m.setFloat('sunAmt', sunAmt); m.setVector3('sunDir', vSun.set(...T.lightDir)); m.setVector3('sunCol', vCol.set(...T.sunCol)); m.setVector3('ambCol', vAmb.set(...T.ambCol)); m.setFloat('wet', ws.wet); m.setFloat('snowCover', ws.snowCover); m.setColor3('fogColor', hz);
+    { const w = chunks.water; w.setFloat('sunAmt', sunAmt); w.setVector3('sunDir', vSun); w.setVector3('sunCol', vCol); w.setVector3('ambCol', vAmb); w.setColor3('fogColor', hz); w.setFloat('choppy', Math.min(1, ws.rain * .7 + ws.storm * .5 + Math.hypot(ws.wind[0], ws.wind[1]) / 14)) } // lake surface: same light and haze as the ground; wind and rain make it choppy
+    chunks.windAmp = .35 + Math.min(1.2, Math.hypot(ws.wind[0], ws.wind[1]) / 9) + .4 * ws.storm; // how hard the trees move: a little always, a lot in a gale
+    { const wlv = terrain.waterAt(p.x, p.z), uw = wlv !== null && p.y < wlv ? 1 : 0; uwK += (uw - uwK) * Math.min(1, dt * 8); // under the surface: blue-green, murky, and dark in proportion to how dark it is up top
+      if (uwK > .01) { const dk = .25 + .75 * Math.min(1, T.lightI); hz.r += (.05 * dk - hz.r) * uwK; hz.g += (.27 * dk - hz.g) * uwK; hz.b += (.33 * dk - hz.b) * uwK; scene.fogStart += (2 - scene.fogStart) * uwK; scene.fogEnd += (46 - scene.fogEnd) * uwK; fogR.set(scene.fogStart, scene.fogEnd) }
+      uwEl.style.display = uwK > .02 ? 'block' : 'none'; uwEl.style.opacity = Math.min(1, uwK) }
     const k = sky.material; k.setColor3('horizon', hz); k.setFloat('cover', ws.cover); k.setFloat('dark', dark); k.setFloat('flash', fl); k.setVector3('sun', vSky.set(...T.sun)); k.setVector3('moon', vMoon.set(...T.moon)); k.setVector3('zenith', vZen.set(...T.zenith)); k.setFloat('night', T.night); k.setFloat('rainbow', ws.rainbow || 0); k.setVector3('sunCol', vCol.set(...T.sunCol)); k.setVector3('cloudCol', vCloud.set(...T.cloud));
-    chunks.props.mat.diffuseColor.set(1 - .22 * ws.wet, 1 - .22 * ws.wet, 1 - .22 * ws.wet); // wet trees and rocks look darker
+    for (const pm of chunks.props.mats) pm.diffuseColor.set(1 - .22 * ws.wet, 1 - .22 * ws.wet, 1 - .22 * ws.wet); // wet trees and rocks look darker
     if (fl > .5 && lastFl < .2) setTimeout(() => amb.thunder(), 400 + Math.random() * 2500); lastFl = fl; amb.update(ws);
     precip.update(p, ws, dt);
   };
   const avatars = new Map(), hud = $('hud');
   const addAv = (id) => { if (!avatars.has(id)) avatars.set(id, new Avatar(scene, id)) };
-  const handlers = { join: addAv, leave: (id) => { avatars.get(id)?.dispose(); avatars.delete(id) },
+  // When late joiners spawn at the base, the gear on the counter scales with the group: whenever someone joins, the host tops the counter up to one flashlight and one pair of binoculars per player.
+  const stockCabin = () => { if (!net?.isHost || cfg.joinSpawn === 'host') return; /* late joiners who spawn next to the host are far from the cabin: no extra gear for them */ const c = house.counter, n = avatars.size + 1;
+    for (const [type, z0] of [['flashlight', -1.05], ['binoculars', .15]]) { let have = 0; for (const o of ground.map.values()) if (o.type === type && Math.hypot(o.x - c.x, o.z - c.z) < 2 && Math.abs(o.y - c.y) < .6) have++;
+      for (let k = have; k < n; k++) { const it = { id: 'cabin-' + type + '-' + Math.random().toString(36).slice(2, 7), type, x: c.x + (Math.floor(k / 4) % 2 ? .22 : -.22), y: c.y + .05, z: c.z + z0 + (k % 4) * .3, rest: true }; ground.add(it); net.sendItem({ op: 'drop', item: it }) } } };
+  const handlers = { join: (id) => { addAv(id); stockCabin() }, leave: (id) => { avatars.get(id)?.dispose(); avatars.delete(id) },
     state: (d) => { addAv(d.id); const a = avatars.get(d.id); a.setState(d.p); a.setName(d.n) },
     pic: (id, d) => { addAv(id); avatars.get(id).setPic(d) },
     where: () => cfg.joinSpawn === 'host' ? [player.cam.position.x, player.cam.position.z] : null, // lets late joiners spawn by the host
@@ -98,21 +108,22 @@ function launch(cfg, joined) {
   }; // player.setAffliction('cold', 20) to test the energy bar
   const me = new Avatar(scene, 'me' + myName); me.self = me.snap = true; me.hideHead(); // your own body, visible when you look down
   const applyOpts = () => { player.sens = opts.sens }; applyOpts(); me.setPic(getPic()); // me: your own picture, which others get over the network but you never did
-  // Items: three slots (keys 1-3 or the wheel), F uses the held item. Flashlight: a real light from your hand. Binoculars: zoom, wheel changes how much.
-  const ITEMS = ITEM_DEFS, inv = joined ? [null, null, null] : [0, 1, 2].map(i => cfg.inv?.[i] || null); // new worlds start with empty hands: the gear is on the cabin counter
-  let sel = -1, torchOn = false, zoomOn = false, zoomT = 4, zoomC = 1, torchK = 0, hbSig = ''; const bar = $('hotbar'), hn = $('hotname');
+  // Items: four slots (keys 1-4 or the wheel), F uses the held item. Flashlight: a real light from your hand. Binoculars: zoom, wheel changes how much.
+  const ITEMS = ITEM_DEFS, inv = joined ? [null, null, null, null] : [0, 1, 2, 3].map(i => cfg.inv?.[i] || null); // new worlds start with empty hands: the gear is on the cabin counter
+  let zoomSaved = 4; try { zoomSaved = +localStorage.getItem('mountain.zoom') || 4 } catch {} // the zoom you last used with the binoculars is the zoom you get next time (even after a reload)
+  let sel = -1, torchOn = false, zoomOn = false, zoomT = Math.max(2, Math.min(12, zoomSaved)), zoomC = 1, torchK = 0, hbSig = ''; const bar = $('hotbar'), hn = $('hotname');
   const spot = new BABYLON.SpotLight('torchL', BABYLON.Vector3.Zero(), new BABYLON.Vector3(0, 0, 1), .75, 6, scene); spot.range = 60; spot.intensity = 0; const tPos = V3(), tDir = V3();
   const held = () => sel >= 0 ? inv[sel] : null;
   const hotbar = () => { const sig = sel + '|' + torchOn + '|' + inv.join(); if (sig === hbSig) return; hbSig = sig; bar.innerHTML = inv.map((it, i) => `<div class="${i === sel ? 'on' : ''}${i === sel && (it === 'flashlight' || it === 'lantern') && torchOn ? ' lit' : ''}"><b>${i + 1}</b>${it ? ITEMS[it].icon : ''}</div>`).join(''); hn.textContent = held() ? ITEMS[held()].name + ((held() === 'flashlight' || held() === 'lantern') ? (torchOn ? ' (on)' : ' (off)') : '') + ' \u00b7 ' + ITEMS[held()].verb + (ITEMS[held()].climbOk ? '' : ' \u00b7 put it away (its number) to climb') : ''; hn.style.display = held() ? 'block' : 'none' };
   const equip = (i) => { sel = i === sel || !inv[i] ? -1 : i; torchOn = zoomOn = false; hbSig = '' };
   addEventListener('keydown', (e) => { if (document.pointerLockElement !== canvas || player.frozen || e.repeat) return;
-    if (['Digit1', 'Digit2', 'Digit3'].includes(e.code)) equip(+e.code.slice(5) - 1) });
-  addEventListener('wheel', (e) => { if (document.pointerLockElement !== canvas || player.frozen) return; if (zoomOn) zoomT = Math.max(2, Math.min(10, zoomT * (e.deltaY < 0 ? 1.15 : 1 / 1.15))); else { const o = [-1, 0, 1, 2], n = o[(o.indexOf(sel) + (e.deltaY > 0 ? 1 : 3)) % 4]; sel = n >= 0 && !inv[n] ? -1 : n; torchOn = false; hbSig = '' } }); // wheel: zoom while using binoculars, otherwise switch item
+    if (['Digit1', 'Digit2', 'Digit3', 'Digit4'].includes(e.code)) equip(+e.code.slice(5) - 1) });
+  addEventListener('wheel', (e) => { if (document.pointerLockElement !== canvas || player.frozen) return; if (zoomOn) { zoomT = Math.max(2, Math.min(12, zoomT * (e.deltaY < 0 ? 1.2 : 1 / 1.2))); try { localStorage.setItem('mountain.zoom', zoomT.toFixed(2)) } catch {} } else { const o = [-1, 0, 1, 2, 3], n = o[(o.indexOf(sel) + (e.deltaY > 0 ? 1 : 4)) % 5]; sel = n >= 0 && !inv[n] ? -1 : n; torchOn = false; hbSig = '' } }); // wheel: zoom while using binoculars, otherwise switch item
   bar.style.display = 'flex'; hotbar();
   // Things on the ground: E picks up, Q drops (tap) or throws (hold, release: the meter shows how hard). The host decides who gets an item, so two friends can't both take it.
   const ground = new GroundItems(scene, terrain, chunks, house.colliders, (x, z) => chunks.boxesNear(x, z)), rid = () => Math.random().toString(36).slice(2, 9), myId = () => net?.id || 'h', me3 = () => player.cam.position;
   if (joined) (joined.items || []).forEach(i => ground.add(i)); else if (cfg.items) cfg.items.forEach(i => ground.add(i));
-  else { const c = house.counter; ground.add({ id: 'cabin-flashlight', type: 'flashlight', x: c.x, y: c.y + .04, z: c.z - .6, rest: true }); ground.add({ id: 'cabin-binoculars', type: 'binoculars', x: c.x, y: c.y + .05, z: c.z + .6, rest: true }) }
+  else { const c = house.counter; ground.add({ id: 'cabin-flashlight', type: 'flashlight', x: c.x, y: c.y + .04, z: c.z - .6, rest: true }); ground.add({ id: 'cabin-binoculars', type: 'binoculars', x: c.x, y: c.y + .05, z: c.z + .6, rest: true }); (house.loot || []).forEach(l => ground.add(l)) }
   // Spawn points along the trail (huts, sheds, caches, berry bushes) turn into ground items the first time you come near; used remembers which already did, or were taken
   const used = new Set(joined ? joined.used || [] : cfg.used || []); let warmFire = 0, cpNear = null, cp = cfg.cp || null; if (!cp && spawn) cp = { id: 'start', x: spawn.x, z: spawn.z, yaw: spawn.yaw };
   const spawnNear = () => { for (const st of terrain.sitesNear(player.cam.position.x, player.cam.position.z, 120)) for (const sp of st.spawns) if (!used.has(sp.id)) { used.add(sp.id); ground.add({ id: sp.id, type: sp.type, x: sp.x, y: sp.y, z: sp.z, rest: true }) } };
@@ -175,11 +186,14 @@ function launch(cfg, joined) {
   slider('fov', 'fovV', () => opts.fov, (v) => { opts.fov = v; saveOpts() });
   slider('vol', 'volV', () => opts.vol, (v) => { opts.vol = v; amb.setVolume(v); saveOpts() }, (v) => Math.round(v * 100) + '%');
   slider('sens', 'sensV', () => opts.sens, (v) => { opts.sens = v; applyOpts(); saveOpts() }, (v) => v.toFixed(1));
+  { const sw = chunks.props.sway, box = $('sway'), saved = (() => { try { return localStorage.getItem('mountain.sway') } catch { return null } })(); // wind sway of trees and grass: on by default, switchable (and remembered) in the pause menu
+    if (!sw) box.parentElement.parentElement.style.display = 'none'; else { sw.isEnabled = saved !== '0'; box.checked = sw.isEnabled; box.onchange = () => { sw.isEnabled = box.checked; try { localStorage.setItem('mountain.sway', box.checked ? '1' : '0') } catch {} } } }
   slider('vd', 'vdV', () => cfg.radius, (v) => { cfg.radius = v; applyRadius(v); const s = JSON.parse(localStorage.getItem('mountain:settings') || '{}'); s.radius = v; s.v = 3; localStorage.setItem('mountain:settings', JSON.stringify(s)) });
   addEventListener('contextmenu', (e) => e.preventDefault());
   resume(); // the Start/Join click is the gesture that lets us lock the mouse right away
 
   let frame = 0, sent = 0, emote = 0, affSig = '', lastSync = 0; $('hint').style.display = $('energy').style.display = $('nav').style.display = 'block';
+  { const hint = $('hint'); hint.textContent += ' · H: hide / show these hints'; let hidden = false; const set = (v) => { hidden = v; hint.style.opacity = v ? 0 : .8 }; setTimeout(() => set(true), 30000); addEventListener('keydown', (e) => { if (e.code === 'KeyH' && !e.repeat && document.pointerLockElement === canvas) set(!hidden) }) } // the control hints fade out after 30 s; H brings them back
   const wheel = createWheel(EMOTES, (i, btn) => {
     if (btn === 2) { if (EMOTES[i]?.picture) $('pic').click(); return } // right-click Picture: choose a new image
     emote = i < 0 || emote === i + 1 ? 0 : i + 1;
@@ -192,7 +206,7 @@ function launch(cfg, joined) {
     if (sig !== affSig) { affSig = sig; let right = 0, html = ''; for (const [k, v] of Object.entries(player.aff)) { html += `<span title="${k}" style="right:${right}%;width:${v}%;background-color:${AFF[k] || '#999'}"></span>`; right += v } $('eaff').innerHTML = html }
     $('efill').style.width = player.stamina + '%'; rsv.style.display = player.reserve > .5 ? 'block' : 'none'; rsv.firstElementChild.style.width = Math.min(100, player.reserve / 60 * 100) + '%'; $('energy').classList.toggle('low', player.exhausted || player.stamina < 25); $('elabel').textContent = player.exhausted ? 'Exhausted' : 'Energy'; $('ewhy').textContent = [player.aff.cold && `Cold: ${Math.round(player.aff.cold)}% lost (${ws.why || 'easing off'})`, player.aff.hunger > 3 && `${hungerV > .75 ? 'Starving' : hungerV > .45 ? 'Hungry' : 'A bit hungry'}: ${Math.round(player.aff.hunger)}% lost`, chalkT > 0 && `Chalk ${Math.ceil(chalkT)}s`, warmT > 0 && `Warm ${Math.ceil(warmT)}s`].filter(Boolean).join(' \u00b7 ');
   };
-  scene.onBeforeRenderObservable.add(() => { player.cam.position.y -= player.drop }); scene.onAfterRenderObservable.add(() => { player.cam.position.y += player.drop }); // the ragdoll view drop applies to rendering only
+  scene.onBeforeRenderObservable.add(() => { const o = player.viewOff, c = player.cam.position; c.x += o[0]; c.y += o[1] - player.drop; c.z += o[2]; player._o = o }); scene.onAfterRenderObservable.add(() => { const o = player._o, c = player.cam.position; c.x -= o[0]; c.y -= o[1] - player.drop; c.z -= o[2] }); // the ragdoll view drop applies to rendering only
   engine.runRenderLoop(() => {
     const dt = engine.getDeltaTime() / 1000, p = player.cam.position, yaw = player.cam.rotation.y;
     if (!(paused && avatars.size === 0)) gt += Math.min(dt, .25); if (!joined) cfg.wt = gt; if (net?.isHost && performance.now() - lastSync > 5000) { lastSync = performance.now(); net.sendTime(gt) } // time stands still while you're paused alone; with friends in the room it keeps going
@@ -228,8 +242,8 @@ function launch(cfg, joined) {
     me.reachTo = pull ? new BABYLON.Vector3(pull.hx, pull.hy, pull.hz) : null;
     for (const a of avatars.values()) { a.reachTo = null; if ((a.flags & 8) && a.tgt) { let best = 3.5; for (const h of hands) { const d = BABYLON.Vector3.Distance(h.v, a.tgt); if (h.who !== a && d < best) { best = d; a.reachTo = h.v } } } }
     me.setState([p.x, p.y, p.z, yaw, emote, player.flags | itemBits, player.pitch]); me.update(dt); avatars.forEach(a => a.update(dt));
-    const tz = Math.max(p.z - 150, -cfg.length); // arrow points at the trail 150 m further along
-    $('arrow').style.transform = `rotate(${Math.atan2(terrain.pathX(tz) - p.x, tz - p.z) - yaw}rad)`; energy();
+    // The arrow points at the summit (not at a trail: there is more than one now, and which way to go is up to you)
+    $('arrow').style.transform = `rotate(${Math.atan2(terrain.pathX(-cfg.length) - p.x, -cfg.length - p.z) - yaw}rad)`; energy();
     if (net && performance.now() - sent > 66) { sent = performance.now(); net.send([+p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2), +yaw.toFixed(3), emote, player.flags | itemBits, +player.pitch.toFixed(2)], myName) }
     if (frame++ % 10 === 0) { // progress: how tall the mountain is, your altitude, the percentage, and where friends are
       const top = Math.round(terrain.peak), alt = Math.max(0, Math.round(p.y - 1.7)), pct = Math.min(100, alt / top * 100), hue = (id) => [...id].reduce((a, c) => a * 31 + c.charCodeAt(0), 7) % 360;
@@ -239,6 +253,7 @@ function launch(cfg, joined) {
     }
     scene.render();
   });
+  if (location.search.includes('debug')) window.__m = { player, terrain, chunks, scene, engine, cfg, avatars }; // for the browser test harness (tests/browser)
   addEventListener('resize', () => engine.resize());
 }
 

@@ -1,8 +1,38 @@
 // Low-poly props: several faceted variants per kind (merged, vertex-colored, instanced per chunk), what grows where, and their collision sizes.
 const rng = (s) => () => { s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296 };
+import { getTextures } from './textures.js';
+// Wind sway: a vertex tweak injected into the foliage material (trees, bushes, grass tufts, flowers). Things bend more the higher the vertex is above its base and each one is out of step with its
+// neighbours. Off unless `plugin.isEnabled = true` (the pause menu toggles it); `t` and `amp` are fed every frame.
+function swayPlugin(mat) {
+  if (!BABYLON.MaterialPluginBase) return null;
+  class Sway extends BABYLON.MaterialPluginBase {
+    constructor(m) { super(m, 'Sway', 220, { SWAY: false }); this._on = false; this.t = 0; this.amp = .5 }
+    get isEnabled() { return this._on } set isEnabled(v) { if (this._on === v) return; this._on = v; this.markAllDefinesAsDirty(); this._enable(v) }
+    prepareDefines(d) { d.SWAY = this._on }
+    getClassName() { return 'Sway' }
+    getUniforms() { return { ubo: [{ name: 'swayT', size: 1, type: 'float' }, { name: 'swayA', size: 1, type: 'float' }], vertex: 'uniform float swayT; uniform float swayA;' } }
+    bindForSubMesh(ub) { if (this._on) { ub.updateFloat('swayT', this.t); ub.updateFloat('swayA', this.amp) } }
+    getCustomCode(shader) {
+      if (shader !== 'vertex') return null;
+      return { CUSTOM_VERTEX_UPDATE_WORLDPOS: `
+#ifdef SWAY
+{ float hh = max(positionUpdated.y, 0.0) * length(finalWorld[1].xyz);
+  vec3 root = finalWorld[3].xyz;
+  float ph = root.x * 0.17 + root.z * 0.23;
+  float bend = hh * hh * 0.0045;
+  float s1 = sin(swayT * 1.25 + ph), s2 = sin(swayT * 0.83 + ph * 1.7 + 1.3);
+  float flutter = sin(swayT * 5.3 + dot(worldPos.xz, vec2(1.9, 2.7))) * min(hh, 3.0) * 0.012;
+  worldPos.x += (s1 * 0.7 + s2 * 0.3) * bend * swayA + flutter * swayA;
+  worldPos.z += (s2 * 0.6 - s1 * 0.2) * bend * swayA * 0.7 + flutter * swayA * 0.6;
+  worldPos.y -= abs(s1) * bend * swayA * 0.04; }
+#endif
+` };
+    }
+  }
+  return new Sway(mat);
+}
 export function makeProps(scene) {
-  const B = BABYLON.MeshBuilder, VB = BABYLON.VertexBuffer, mat = new BABYLON.StandardMaterial('props', scene), P = {}, V = {};
-  mat.specularColor = BABYLON.Color3.Black();
+  const B = BABYLON.MeshBuilder, VB = BABYLON.VertexBuffer, P = {}, V = {}, T = getTextures(scene), mk = (key) => { const m = new BABYLON.StandardMaterial('props-' + key, scene); m.specularColor = BABYLON.Color3.Black(); if (T?.[key]) m.diffuseTexture = T[key]; return m }, mats = { foliage: mk('foliage'), bark: mk('bark'), rock: mk('rock') }, mat = mats.foliage; mats.rock.emissiveColor = new BABYLON.Color3(.1, .1, .105); mats.bark.emissiveColor = new BABYLON.Color3(.05, .04, .035); mats.foliage.emissiveColor = new BABYLON.Color3(.04, .05, .04); // so the shaded side of a rock or trunk is dim, not black // textured (greys), tinted by each mesh's vertex colours
   const col = (m, c) => { const a = []; for (let i = 0; i < m.getTotalVertices(); i++) a.push(c[0], c[1], c[2], 1); m.setVerticesData(VB.ColorKind, a); return m };
   const cyl = (h, d, y, c, top = d) => { const m = B.CreateCylinder('c', { height: h, diameterTop: top, diameterBottom: d, tessellation: 7 }, scene); m.position.y = y; return col(m, c) };
   const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
@@ -20,7 +50,7 @@ export function makeProps(scene) {
     m.setVerticesData(VB.PositionKind, p); m.setVerticesData(VB.NormalKind, nor); m.setVerticesData(VB.ColorKind, cols);
     m.scaling.set(sc[0], sc[1], sc[2]); m.position.set(x, y, z); return m;
   };
-  const reg = (name, n, make) => { V[name] = n; for (let i = 0; i < n; i++) { const m = BABYLON.Mesh.MergeMeshes(make(i, rng(i * 977 + name.length * 131)), true); m.material = mat; m.isVisible = false; P[name + i] = m } };
+  const reg = (name, n, make, key = 'foliage') => { V[name] = n; for (let i = 0; i < n; i++) { const m = BABYLON.Mesh.MergeMeshes(make(i, rng(i * 977 + name.length * 131)), true); m.material = mats[key]; m.isVisible = false; P[name + i] = m } };
   const BR = [.4, .27, .15], G1 = [.12, .4, .18], G2 = [.18, .5, .22], DB = [.38, .32, .27];
   const conifer = (c1, c2, shapes) => (i, r) => { const [L, h, w] = shapes[i], parts = [cyl(2, .5, 1, BR)];
     for (let k = 0; k < L; k++) { const lh = h / L * 1.6; parts.push(cyl(lh, w * (1 - k / (L + .6)), 1.7 + k * h / L + lh / 2, k % 2 ? c2 : mix(c1, c2, r()), 0)) } return parts };
@@ -32,11 +62,11 @@ export function makeProps(scene) {
   reg('autumnA', 3, round([.85, .38, .1], [.75, .22, .08]));
   reg('autumnB', 3, round([.82, .62, .1], [.9, .72, .2]));
   reg('dead', 3, (i, r) => { const h = 3.5 + i * .8, parts = [cyl(h, .38, h / 2, DB, .14)];
-    for (let k = 0; k < 2 + i; k++) { const a = r() * 6.28, b = cyl(1.4 + r(), .14, 0, DB, .04); b.rotation.z = .8 + r() * .4; b.rotation.y = a; b.position.set(Math.cos(a) * .5, h * (.4 + .15 * k), -Math.sin(a) * .5); parts.push(b) } return parts });
+    for (let k = 0; k < 2 + i; k++) { const a = r() * 6.28, b = cyl(1.4 + r(), .14, 0, DB, .04); b.rotation.z = .8 + r() * .4; b.rotation.y = a; b.position.set(Math.cos(a) * .5, h * (.4 + .15 * k), -Math.sin(a) * .5); parts.push(b) } return parts }, 'bark');
   reg('cactus', 3, (i, r) => { const C = [.25, .5, .25], parts = [cyl(3 + i * .5, .7, 1.5 + i * .25, C)];
-    for (let k = 0; k <= i; k++) { const sd = k % 2 ? -1 : 1, arm = cyl(.8, .3, 1.4 + k * .5, C); arm.rotation.z = Math.PI / 2; arm.position.x = sd * .45; parts.push(arm, cyl(1 + r(), .34, 1.9 + k * .5, C)); parts[parts.length - 1].position.x = sd * .8 } return parts });
+    for (let k = 0; k <= i; k++) { const sd = k % 2 ? -1 : 1, arm = cyl(.8, .3, 1.4 + k * .5, C); arm.rotation.z = Math.PI / 2; arm.position.x = sd * .45; parts.push(arm, cyl(1 + r(), .34, 1.9 + k * .5, C)); parts[parts.length - 1].position.x = sd * .8 } return parts }, 'bark');
   const rock = (c, sc) => (i, r) => [facet(2, 0, .45, 0, mix(c, [c[0] * .8, c[1] * .8, c[2] * .85], r()), { jit: .28, seed: i + 3, sc: [sc[0] + r() * .4, sc[1] + r() * .4, sc[2] + r() * .3] })];
-  reg('boulder', 4, rock([.5, .5, .52], [1, .55, .9])); reg('redRock', 3, rock([.62, .36, .26], [1, .6, .9])); reg('snowRock', 3, rock([.85, .88, .92], [1, .55, .9]));
+  reg('boulder', 4, rock([.5, .5, .52], [1, .55, .9]), 'rock'); reg('redRock', 3, rock([.62, .36, .26], [1, .6, .9]), 'rock'); reg('snowRock', 3, rock([.85, .88, .92], [1, .55, .9]), 'rock');
   const bush = (c) => (i, r) => [facet(1.3 + r() * .6, 0, .5, 0, c, { jit: .15, sc: [1, .7, 1], seed: i }), facet(.9 + r() * .5, .6, .4, .3, mix(c, [1, 1, 1], .1), { jit: .15, sc: [1, .7, 1], seed: i + 5 })];
   reg('bush', 3, bush([.18, .42, .15])); reg('bushA', 2, bush([.7, .35, .1]));
   reg('tuft', 2, (i, r) => [cyl(.6 + i * .2, .3, .3, [.4, .7, .25], 0), cyl(.5, .25, .25, [.35, .65, .22], 0), cyl(.45, .25, .22, [.45, .72, .3], 0)].map((m, k) => { m.position.x = (k - 1) * .15; return m }));
@@ -45,9 +75,11 @@ export function makeProps(scene) {
   reg('overhang', 3, (i, r) => [ // an irregular slab with two lobes, so it reads as natural rock, not a block
     facet(6, 0, 0, 0, mix([.5, .5, .52], [.42, .4, .4], r()), { jit: .3, sc: [1, .38, .8], seed: 40 + i }),
     facet(3.4, 1.9, -.5, .5, [.48, .47, .5], { jit: .3, sc: [1, .5, .9], seed: 50 + i }),
-    facet(2.6, -2.1, -.3, -.6, [.45, .45, .47], { jit: .3, sc: [1, .55, 1], seed: 60 + i })]);
-  return { P, V, mat };
+    facet(2.6, -2.1, -.3, -.6, [.45, .45, .47], { jit: .3, sc: [1, .55, 1], seed: 60 + i })], 'rock');
+  return { P, V, mat, mats: Object.values(mats), sway: swayPlugin(mats.foliage) };
 }
+// Tilt: [random lean (radians), how much it follows the slope (0 = always plumb, 1 = square to the ground)]. Things stay roughly upright but no two stand quite the same.
+export const TILT = { pine: [.1, .2], snowPine: [.1, .2], oak: [.11, .2], autumnA: [.11, .2], autumnB: [.11, .2], dead: [.22, .25], cactus: [.07, .1], boulder: [.35, .8], redRock: [.35, .8], snowRock: [.35, .8], bush: [.12, .6], bushA: [.12, .6], tuft: [.2, .7], flowerY: [.18, .5], flowerP: [.18, .5], flowerW: [.18, .5] };
 export const COLLIDE = { pine: [.45, 5], snowPine: [.45, 5], oak: [.5, 4], autumnA: [.5, 4], autumnB: [.5, 4], dead: [.35, 4], cactus: [.5, 3], boulder: [1.15, 1, 1], redRock: [1.15, 1, 1], snowRock: [1.15, 1, 1] }; // [radius, height, climbable] at scale 1; climbable things can be grabbed, scaled and stood on
 const D = (density, items) => ({ density, items, total: items.reduce((a, i) => a + i[1], 0) }); // [prefab, weight, minScale, maxScale]
 export const DECOR = [ // index = biome id: meadow, forest, badlands, rock, snow, autumn, swamp, tundra

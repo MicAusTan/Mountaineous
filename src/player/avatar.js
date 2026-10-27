@@ -73,6 +73,8 @@ export class Avatar {
     if (this.flags & 2 && !this.climb) g = { ...g, aR: [aim, .1] };   // right click: right hand reaches toward where you look
     if (bUp && !this.climb) g = { ...g, aL: [-2.0, -.12], aR: [-2.0, .12] }; // binoculars raised to the eyes
     const down = !!(this.flags & 16); if (down) g = P({ aL: [-.9 + Math.sin(this.t * 2.1) * .12, -1.3], aR: [-.4 + Math.sin(this.t * 1.7 + 1) * .12, 1.1], lL: .35, lR: -.5 }); // knocked down: limbs sprawled
+    const swim = !!(this.flags & 2048) && !down, kick = swim && speed > .6; // swimming: a crawl while moving, treading water when still
+    if (swim) g = kick ? P({ aL: [-2.5 + Math.sin(this.t * 5) * .95, -.12], aR: [-2.5 + Math.sin(this.t * 5 + Math.PI) * .95, .12], lL: Math.sin(this.t * 10) * .4, lR: -Math.sin(this.t * 10) * .4 }) : P({ aL: [-.7 + Math.sin(this.t * 3) * .4, -.55], aR: [-.7 + Math.sin(this.t * 3 + 2.1) * .4, .55], lL: Math.sin(this.t * 6) * .45, lR: -Math.sin(this.t * 6) * .45 });
     this.frame.setEnabled(!!def?.picture && !this.climb && !down); this.torch.setEnabled(hasT && !down); this.beam.setEnabled(hasT && tOn && !this.self && !down); this.lens.material.emissiveColor.set(tOn ? 1 : .25, tOn ? .95 : .25, tOn ? .7 : .22); this.binos.setEnabled(hasB && !down && !(bUp && this.self)); this.lamp.setEnabled(hasL && !down); this.lampGlass.emissiveColor.set(lOn ? 1 : .3, lOn ? .78 : .25, lOn ? .35 : .15);
     const c = this.cur, m = Math.min(1, dt * 10), l = (a, b) => a + (b - a) * m;
     c.aLx = l(c.aLx, g.aL[0]); c.aLz = l(c.aLz, g.aL[1]); c.aRx = l(c.aRx, g.aR[0]); c.aRz = l(c.aRz, g.aR[1]);
@@ -84,6 +86,11 @@ export class Avatar {
       const rx = -1.5 * c.lie, q = BABYLON.Quaternion.RotationYawPitchRoll(this.yaw, rx, 0), v = new BABYLON.Vector3(0, .9, 0).rotateByQuaternionToRef(q, this._v), cy = (this.pos.y - c.drop + .9) * (1 - c.lie) + (this.pos.y + .16) * c.lie;
       this.root.rotation.x = rx; this.root.position.set(bx - v.x, cy - v.y, bz - v.z);
     } else { this.root.rotation.x = 0; this.root.position.set(bx, this.pos.y - c.drop, bz) }
+    c.sw = (c.sw || 0) + (((kick && !this.self) ? 1 : 0) - (c.sw || 0)) * Math.min(1, dt * 5);
+    if (c.sw > .001) { // face down in the water: body flat, its middle just under the surface (your own view keeps the upright body so it never blocks the screen)
+      const rx = 1.4 * c.sw, q = BABYLON.Quaternion.RotationYawPitchRoll(this.yaw, rx, 0), v = new BABYLON.Vector3(0, .9, 0).rotateByQuaternionToRef(q, this._v), cy = this.pos.y + 1.7 - .42, r = this.root.position;
+      this.root.rotation.x = rx; r.set(r.x + (bx - v.x - r.x) * c.sw, r.y + (cy - v.y - r.y) * c.sw, r.z + (bz - v.z - r.z) * c.sw);
+    }
     if ((this.flags & 8) && this.reachTo) { // being pulled by a friend's hand: your arm stretches out to meet it
       const cs = Math.cos(this.yaw), sn = Math.sin(this.yaw), r = this.root.position, rt = this.reachTo, ex = rt.x - (r.x + .25 * cs), ey = rt.y - (r.y + 1.45), ez = rt.z - (r.z - .25 * sn);
       const lx = ex * cs - ez * sn, lz = ex * sn + ez * cs, len = Math.hypot(lx, ey, lz) || 1;
