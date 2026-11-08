@@ -1,7 +1,7 @@
 // Pure math: same seed + length (+ generator version) => same mountain on every client.
 import { placeFeatures, FCS } from './features.js';
 import { siteSeg, sitesNear, padHeight, siteClear, spawnDef, allSites } from './sites.js';
-import { trailDist, trailXs } from './trails.js';
+import { trailDist, trailXs, trailNear } from './trails.js';
 export const HOUSE = { x: 25, z: -15 };   // starter house, on a flattened pad
 export const LAKE_CELL = 500;             // lakes are seeded one-per-cell
 const STEP = 2, STEP_CAP = 30, ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t) };
@@ -10,10 +10,12 @@ export function hashSeed(s) { s = String(s); let h = 2166136261; for (let i = 0;
 export class Terrain {
   // o.climb 0..1: how often climbing sections appear; o.step: how tall cliff steps are in general (sv 2: the typical height, single steps vary from about half to over twice that, hard cap STEP_CAP; sv 1, saved worlds: the tallest step, max 18); o.lakes: lake chance per cell
   constructor(seed, length = 20000, o = {}) {
-    this.seed = hashSeed(seed); this.length = length; this.climb = o.climb ?? 0.5; this.sv = o.sv ?? 1; this.scn = o.scn ?? 0; this.sf = o.sf ?? 1; this.cv = o.cv ?? 0; this.tr = o.tr ?? 0; this.trl = new Map(); /* tr: side trails (trails.js) and deep swimmable lakes; older worlds have neither */ /* scn: sites along the trail (sites.js), sf: how often (0 = none), cv: caves (features.js); older worlds have none of them */ this.step = o.step ?? 12; this.stepMax = this.sv >= 2 ? this.step : Math.min(this.step, 18); this.lakeP = o.lakes ?? 0.2;
+    this.seed = hashSeed(seed); this.length = length; this.climb = o.climb ?? 0.5; this.sv = o.sv ?? 1; this.scn = o.scn ?? 0; this.sf = o.sf ?? 1; this.cv = o.cv ?? 0; this.tr = o.tr ?? 0; this.v3 = o.v3 ?? 0; /* v3 (new worlds only): cliffs of finite width, a flat trail cross-section, a real summit, stray paths, biome-based climate */ this.trl = new Map(); /* tr: side trails (trails.js) and deep swimmable lakes; older worlds have neither */ /* scn: sites along the trail (sites.js), sf: how often (0 = none), cv: caves (features.js); older worlds have none of them */ this.step = o.step ?? 12; this.stepMax = this.sv >= 2 ? this.step : Math.min(this.step, 18); this.lakeP = o.lakes ?? 0.2;
     this.gen = o.gen ?? 1; this.featP = o.featP ?? 0.8; this.freeP = o.freeP ?? (o.cv ? 0.05 : 0.025); /* featP: chance a cell gets an overhang; freeP: chance it gets an arch or spires instead */ this.house = HOUSE; this.fcache = new Map(); this.fnear = { key: null, list: [] }; // gen 1 = original mountain, gen 2 = adds 3D rock features
     this.STEP = STEP; this.startFlat = 250; this.lakes = new Map(); this.buildProfile(); this.h0 = this.rawHeight(HOUSE.x, HOUSE.z);
+    if (this.v3) { const z = -this.summitDist, x = this.pathX(z); this.summit = { x, z, h: this.rawHeight(x, z) }; this.peak = this.summit.h } /* the real top: the HUD height, the arrow and the summit flag all use it */
   }
+  get summitDist() { return this.length + 120 }
   rnd(ix, iz, k = 0) { // deterministic hash -> [0,1)
     let h = (Math.imul(ix, 374761393) + Math.imul(iz, 668265263) + Math.imul(this.seed + k, 2147483647)) | 0;
     h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
@@ -43,7 +45,7 @@ export class Terrain {
   // walk along the ledge, find the next gap. Which steps are open or sheer, and where the gaps are, is random per step, so one climbable
   // spot says nothing about the next. Every sheer step has at least one gap, so every cliff can always be climbed.
   buildProfile() {
-    const n = this.n = Math.ceil(this.length / STEP) + 2, sl = new Float32Array(n), f = this.climb, seg = 1400 - 1180 * f, ledges = [], list = [];
+    const n = this.n = Math.ceil(this.length / STEP) + 2, sl = new Float32Array(n), f = this.climb, seg = 1400 - 1180 * f, ledges = [], list = [], secs = this.secs = [], PAD = 50;
     for (let i = 0; i < n; i++) sl[i] = 0.04 + 0.32 * ss(0.3, 0.8, this.noise(i * STEP / 1500, 3.7, 11));
     const rise = (arr, from, len, str) => { // adds a smooth rise of exactly str*len/2 metres of height, however few samples fall inside it (short steps used to vanish between samples)
       const H = str * len / 2, idx = [], w = []; let S = 0;
@@ -57,17 +59,23 @@ export class Terrain {
       let c = (s + 0.15 + 0.5 * this.rnd(s, 2, 302)) * seg;
       if (this.rnd(s, 1, 301) < 0.3) { const w = 80 + this.rnd(s, 3, 303) * 80; c = Math.max(c, 300 + w, end + 30 + w); rise(sl, c - w, 2 * w, 0.35 + this.rnd(s, 4, 304) * 0.25); end = c + w } // wide ramp, never near the grab slope
       else {
-        c = Math.max(c, 300, end + 30); let pos = c; const steps = 1 + Math.floor(this.rnd(s, 5, 305) * 4);
+        c = Math.max(c, 300, end + 30 + (this.v3 ? 120 : 0)); let pos = c; const secI = this.v3 ? secs.length : -1; if (this.v3) { const W = 110 + 200 * this.rnd(s, 6, 330); secs.push({ a: c, b: c, W, ox: (this.rnd(s, 7, 331) - .5) * .5 * W }) } /* a cliff is a band of finite width W (half) around cx: beside it the ground just slopes up */ const steps = 1 + Math.floor(this.rnd(s, 5, 305) * 4);
         for (let k = 0; k < steps; k++) { // heights, steepness and ledge lengths all vary step to step
           const H = this.stepH(this.rnd(s, 10 + k, 306), this.rnd(s, 40 + k, 309)), str = 1.7 + 0.7 * this.rnd(s, 20 + k, 307), L = 2 * H / str; // rise = str * L / 2 = H
           for (let i = Math.max(0, Math.floor(pos / STEP)); i < Math.min(n, Math.ceil((pos + L) / STEP)); i++) sl[i] = 0.04; // a step is as tall as it says, not plus the ordinary slope
-          rise(sl, pos, L, str); list.push({ s, k, a: pos, L }); pos += L; const le = 6 + 12 * this.rnd(s, 30 + k, 308); ledges.push([pos, pos + le]); pos += le;
+          rise(sl, pos, L, str); list.push({ s, k, a: pos, L, sec: secI }); pos += L; const le = 6 + 12 * this.rnd(s, 30 + k, 308); ledges.push([pos, pos + le]); pos += le;
         }
-        end = pos;
+        end = pos; if (this.v3) secs[secI].b = pos;
       }
     }
     for (const [a, b] of ledges) for (let i = Math.max(0, Math.floor(a / STEP)); i < Math.min(n, Math.ceil(b / STEP)); i++) sl[i] = 0.03; // flat rest ledges
     this.tab = new Float32Array(n); { let h = 0; for (let i = 0; i < n; i++) { this.tab[i] = h; h += sl[i] * STEP } } this.peak = this.tab[n - 1];
+    if (this.v3) { /* where each band is, the gentle slope that replaces the staircase outside it, and how far a stray path must keep away */
+      this.secIdx = new Int16Array(n + 2).fill(-1); this.needP = new Float32Array(n + 2); this.needM = new Float32Array(n + 2);
+      secs.forEach((sc, k) => { const mid = (sc.a + sc.b) / 2; sc.cx = this.pathX(-(mid + this.startFlat * .5)) + sc.ox; sc.ia = Math.max(0, Math.floor((sc.a - PAD) / STEP)); sc.ib = Math.min(n - 1, Math.ceil((sc.b + PAD) / STEP)); sc.ya = this.tab[sc.ia]; sc.yb = this.tab[sc.ib];
+        for (let i = sc.ia; i <= sc.ib; i++) if (this.secIdx[i] < 0) this.secIdx[i] = k;
+        for (let i = Math.max(0, sc.ia - 75); i <= Math.min(n - 1, sc.ib + 75); i++) { const pos = i * STEP, out = Math.max(0, sc.a - PAD - pos, pos - sc.b - PAD), kk = 1 - ss(0, 150, out); this.needP[i] = Math.max(this.needP[i], (sc.W + 135 + sc.ox) * kk); this.needM[i] = Math.max(this.needM[i], (sc.W + 135 - sc.ox) * kk) } })
+    }
     this.steps = []; this.sidx = new Int32Array(n + 2).fill(-1); let prev = null;
     for (const st of list) { // decide, step by step, what is open, what is sheer, and where the gaps are
       const i0 = Math.max(0, Math.floor(st.a / STEP)), i1 = Math.min(n - 2, Math.ceil((st.a + st.L) / STEP)); if (i1 <= i0) continue;
@@ -76,17 +84,17 @@ export class Terrain {
       const dA = this.tab[i1] - this.tab[i0], sheer = dA >= 4 && R(0) < (st.k === 0 ? 0.6 : 0.75); // a tiny step can't be a real wall
       if (sheer) for (let g = 0, ng = R(1) < 0.3 ? 2 : 1; g < ng; g++) {
         const from = prev ?? px, side = R(6 + g) < 0.5 ? -1 : 1, off = st.k === 0 ? (R(8 + g) - 0.5) * 80 : side * (30 + 230 * R(8 + g)); // first gap near the trail, later ones wander sideways
-        gaps.push({ w: 7 + 18 * R(10 + g), xc: Math.max(px - 320, Math.min(px + 320, from + off)) });
+        gaps.push({ w: 7 + 18 * R(10 + g), xc: this.v3 ? Math.max(this.secs[st.sec].cx - this.secs[st.sec].W * .8, Math.min(this.secs[st.sec].cx + this.secs[st.sec].W * .8, from + off)) : Math.max(px - 320, Math.min(px + 320, from + off)) });
       }
       prev = gaps.length ? gaps[0].xc : (prev ?? px);
       // the wall's width scales with the step so even short steps become truly sheer (peak grade ~4-5)
-      this.steps.push({ i0, i1, dA, mid, lb: Math.max(1.2, Math.min(5, dA * 0.3 * (0.8 + 0.4 * R(14)))), sheer, gaps });
+      this.steps.push({ sec: st.sec, i0, i1, dA, mid, lb: Math.max(1.2, Math.min(5, dA * 0.3 * (0.8 + 0.4 * R(14)))), sheer, gaps });
       for (let i = i0; i < i1; i++) this.sidx[i] = this.steps.length - 1;
     }
   }
   stepAt(x, z) { // the cliff step (if any) whose wall is at (x,z); same z-wobble as rawHeight
     const zs = z + (this.fbm(x / 80, z / 160, 77, 3) - 0.44) * 60, f = Math.min(Math.max(0, -zs - this.startFlat * 0.5) / STEP, this.n - 1.001), si = this.sidx[Math.floor(f)];
-    return si < 0 ? null : this.steps[si];
+    if (si < 0) return null; const st = this.steps[si]; if (this.v3) { const sc = this.secs[st.sec]; if (Math.abs(x - sc.cx) > sc.W + 100) return null } return st;
   }
   features(cx, cz) { const key = cx * 131071 + cz; let l = this.fcache.get(key); if (!l) { l = placeFeatures(this, cx, cz); this.fcache.set(key, l) } return l }
   featuresNear(x, z) { // features in the 3x3 cells around (x,z): cached for the cell, since collision asks every frame
@@ -99,19 +107,30 @@ export class Terrain {
   }
   baseHeight(z, x = 0) {
     const f = Math.min(Math.max(0, -z - this.startFlat * 0.5) / STEP, this.n - 1.001), i = Math.floor(f), a = this.tab[i] + (this.tab[i + 1] - this.tab[i]) * (f - i);
-    const si = this.sidx[i]; if (si < 0) return a;
-    const st = this.steps[si], m = this.sheerAt(st, x); if (m <= 0) return a;
-    return a + (this.tab[st.i0] + st.dA * ss(st.mid - st.lb / 2, st.mid + st.lb / 2, f * STEP) - a) * m; // blend staircase -> the same height as one sheer wall
+    const si = this.sidx[i]; let r = a;
+    if (si >= 0) { const st = this.steps[si], m = this.sheerAt(st, x); if (m > 0) r = a + (this.tab[st.i0] + st.dA * ss(st.mid - st.lb / 2, st.mid + st.lb / 2, f * STEP) - a) * m } // blend staircase -> the same height as one sheer wall
+    if (this.v3) { const k = this.secIdx[i]; if (k >= 0) { const sc = this.secs[k], wx = 1 - ss(sc.W, sc.W + 100, Math.abs(x - sc.cx)); if (wx < 1) { const g = sc.ya + (sc.yb - sc.ya) * Math.max(0, Math.min(1, (f - sc.ia) / (sc.ib - sc.ia))); r = g + (r - g) * wx } } } // beside the cliff band the staircase melts into one gentle slope: a cliff is a place, not a wall across the whole mountain
+    return r;
   }
   rawHeight(x, z) {
     const t = this.progress(z), zs = z + (this.fbm(x / 80, z / 160, 77, 3) - 0.44) * 60, base = this.baseHeight(zs, x); // zs: cliff lines wander and run diagonally, so they're never the same
+    if (this.v3) return this.rawV3(x, z, t, base);
     const rough = (this.fbm(x / 160, z / 160, 3) - 0.5) * 2 * (20 + 90 * t) * Math.min(1, t * 8) + (this.fbm(x / 30, z / 30, 20) - 0.5) * 6;
     const pathMask = Math.max(0, 1 - trailDist(this, x, z) / 40);
     return base + rough * (1 - pathMask * 0.85);
   }
+  rawV3(x, z, t, base) { // new worlds: the ground around any trail follows the trail's own roughness (flat across the path, no ridge with sinking sides), and the top is a real summit
+    const L = this.length, amp = 20 + 55 * t, k = Math.min(1, t * 8), rr = (xx) => (this.fbm(xx / 160, z / 160, 3) - .5) * 2 * amp * k + (this.fbm(xx / 30, z / 30, 20) - .5) * 6;
+    const nr = trailNear(this, x, z), m = 1 - ss(10, 240, nr.d); let rough = rr(x) * (1 - m) + rr(nr.x) * .15 * m;
+    const SZ = this.summitDist, dom = ss(L - 500, SZ, -z); rough *= 1 - .85 * dom; let h = base + rough;
+    if (dom > 0) h -= dom * 90 * ss(40, 300, Math.abs(x - this.pathX(-SZ))); // the ground falls away around the top
+    const over = -z - SZ; if (over > 0) h -= 90 * ss(0, 200, over);
+    return Math.min(h, this.tab[this.n - 1] + 10 - .08 * Math.hypot(x - this.pathX(-SZ), z + SZ)); // nothing anywhere is higher than the summit: the ground can only climb so steeply towards it
+  }
   height(x, z) { // raw terrain, flattened under the house, with lake basins carved in
     let h = this.rawHeight(x, z); const dh = Math.hypot(x - HOUSE.x, z - HOUSE.z);
     if (dh < 34) h = this.h0 + (h - this.h0) * ss(14, 34, dh);
+    if (this.summit) { const S = this.summit, ds = Math.hypot(x - S.x, z - S.z); if (ds < 24) h = S.h + (h - S.h) * ss(8, 24, ds) } // a flat top for the flag
     if (this.scn) h = padHeight(this, x, z, h);
     const i0 = Math.floor(x / LAKE_CELL), j0 = Math.floor(z / LAKE_CELL);
     for (let i = i0 - 1; i <= i0 + 1; i++) for (let j = j0 - 1; j <= j0 + 1; j++) {
@@ -145,7 +164,7 @@ export class Terrain {
   onPath(x, z) { const d = trailDist(this, x, z); return Math.max(0, Math.min(1, 1 - (d - 3) / 3)) }
   // Biomes come from noise; altitude only nudges the odds, so any biome can appear at any height.
   biomeScores(x, z, h = this.height(x, z)) {
-    const alt = Math.min(1, h / this.peak), n = (k) => this.fbm(x / 500, z / 500, 50 + k * 10, 3), a = Math.abs;
+    const alt = Math.min(1, h / this.peak) * (this.v3 ? .55 : 1) /* v3: height only nudges the odds a little, so a big mountain is not just snow at the top */, n = (k) => this.fbm(x / 500, z / 500, 50 + k * 10, 3), a = Math.abs;
     return [n(0) - alt * 0.25, n(1) + 0.15 - a(alt - 0.3), n(2) - 0.05 - a(alt - 0.5) * 0.4, n(3) + alt * 0.3,
       n(4) - 0.05 + alt * 0.45, n(5) + 0.1 - a(alt - 0.4) * 0.5, n(6) + 0.05 - a(alt - 0.15) * 0.8, n(7) + 0.05 - a(alt - 0.65) * 0.5];
   }
@@ -156,3 +175,4 @@ export class Terrain {
 }
 export const BIOME_NAMES = ['meadow', 'forest', 'badlands', 'rock', 'snow', 'autumn forest', 'swamp', 'alpine tundra'];
 export const BIOME_COLORS = [[.35,.65,.25],[.15,.45,.2],[.8,.65,.4],[.5,.5,.52],[.95,.97,1],[.75,.4,.12],[.25,.35,.2],[.55,.6,.4]];
+export const BIOME_COLD = [.08, .1, 0, .4, .95, .15, .1, .65]; // how cold the land is in each biome (0 mild/hot .. 1 frozen): snow, cold and blizzards follow this, not height

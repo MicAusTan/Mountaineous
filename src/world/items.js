@@ -15,14 +15,17 @@ export const ITEM_DEFS = {
   energyDrink: { icon: '\u{1F964}', name: 'Energy drink', use: 'hold', hold: 1, eat: { reserve: 45 }, verb: 'hold click to drink (temporary reserve energy)' },
   chalk: { icon: '\u{1F9C2}', name: 'Chalk', use: 'hold', hold: .8, buff: 'chalk', verb: 'hold click: dry hands, climbing costs less and wet rock stops mattering for 2 min' },
   handWarmer: { icon: '\u{1F9E4}', name: 'Hand warmer', use: 'hold', hold: .6, buff: 'warm', verb: 'hold click: keeps you warmer for 90 s' },
+  apple: { icon: '\u{1F34E}', name: 'Apple', use: 'hold', hold: .7, eat: { energy: 8, hunger: 14 }, verb: 'hold click to eat' },
+  beans: { icon: '\u{1F96B}', name: 'Canned beans', use: 'hold', hold: 1.6, eat: { energy: 16, hunger: 42 }, verb: 'hold click to eat (very filling)' },
+  thermos: { icon: '\u2615', name: 'Hot tea', use: 'hold', hold: 1.2, eat: { energy: 8, reserve: 14, warm: 60 }, verb: 'hold click to drink (warms you up for a minute)' },
+  waterBottle: { icon: '\u{1F9F4}', name: 'Water bottle', use: 'hold', hold: .9, eat: { energy: 6, reserve: 8, hunger: 4 }, verb: 'hold click to drink' },
+  firstAid: { icon: '\u{1FA79}', name: 'First aid kit', use: 'hold', hold: 2.2, eat: { heal: 50 }, verb: 'hold click to treat your injuries' },
+  bandage: { icon: '\u{1FA7A}', name: 'Bandage', use: 'hold', hold: 1.1, eat: { heal: 20 }, verb: 'hold click to patch yourself up' },
+  herb: { icon: '\u{1F33F}', name: 'Mountain herb', use: 'hold', hold: .8, eat: { energy: 5, heal: 12, hunger: 4 }, verb: 'hold click to chew (soothes injuries a little)' },
   piton: { icon: '\u{1FA9D}', name: 'Piton', use: 'hold', hold: 1.2, climbOk: true, verb: 'hold click on a wall to hammer it in: hang there and rest. E picks it back up' },
 };
-const DT = 1 / 240, G = 20; // small steps, so a hard throw cannot slip through a thin wall
-export class GroundItems {
-  constructor(scene, terrain, world, boxes = [], boxesFn = null) { this.scene = scene; this.t = terrain; this.W = world; this.boxes = boxes; this.boxesFn = boxesFn; // boxes: the cabin walls, which items bounce off
-    this.map = new Map(); this.acc = 0; this.onRest = null }
-  mesh(type) {
-    const S = this.scene, B = BABYLON.MeshBuilder, root = new BABYLON.TransformNode('item', S), m = (c) => { const x = new BABYLON.StandardMaterial('im', S); x.diffuseColor = new BABYLON.Color3(...c); x.emissiveColor = new BABYLON.Color3(c[0] * .25, c[1] * .25, c[2] * .25); x.specularColor = BABYLON.Color3.Black(); return x };
+export function makeItemMesh(S, type) {
+    const  B = BABYLON.MeshBuilder, root = new BABYLON.TransformNode('item', S), m = (c) => { const x = new BABYLON.StandardMaterial('im', S); x.diffuseColor = new BABYLON.Color3(...c); x.emissiveColor = new BABYLON.Color3(c[0] * .25, c[1] * .25, c[2] * .25); x.specularColor = BABYLON.Color3.Black(); return x };
     const part = (g) => { g.parent = root; return g };
     if (type === 'flashlight') { const b = part(B.CreateCylinder('fb', { height: .24, diameter: .07 }, S)); b.rotation.z = Math.PI / 2; b.material = m([.25, .27, .32]); const l = part(B.CreateCylinder('fl', { height: .03, diameter: .1 }, S)); l.rotation.z = Math.PI / 2; l.position.x = .13; l.material = m([1, .9, .5]) }
     else if (type === 'jerky') { const b = part(B.CreateCylinder('jk', { height: .22, diameter: .05, tessellation: 6 }, S)); b.rotation.z = Math.PI / 2; b.material = m([.45, .2, .12]); const w = part(B.CreateCylinder('jw', { height: .05, diameter: .055, tessellation: 6 }, S)); w.rotation.z = Math.PI / 2; w.position.x = -.06; w.material = m([.85, .8, .6]) }
@@ -35,9 +38,24 @@ export class GroundItems {
     else if (type === 'snack') { const b = part(B.CreateBox('sn', { width: .2, height: .04, depth: .09 }, S)); b.material = m([.55, .3, .15]); const w = part(B.CreateBox('sw', { width: .1, height: .045, depth: .095 }, S)); w.material = m([.9, .8, .3]) }
     else if (type === 'berries') { for (let i = 0; i < 6; i++) { const b = part(B.CreateSphere('br', { diameter: .09, segments: 4 }, S)); b.position.set(Math.cos(i * 1.05) * .06, .04 + (i % 2) * .04, Math.sin(i * 1.05) * .06); b.material = m([.7, .08, .25]) } }
     else if (type === 'lantern') { const b = part(B.CreateCylinder('lb', { height: .2, diameter: .13, tessellation: 8 }, S)); b.position.y = .1; b.material = m([1, .78, .35]); const c = part(B.CreateCylinder('lc', { height: .04, diameter: .15, tessellation: 8 }, S)); c.position.y = .22; c.material = m([.2, .2, .22]) }
+    else if (type === 'apple') { const b = part(B.CreateSphere('ap', { diameter: .1, segments: 6 }, S)); b.position.y = .05; b.material = m([.8, .12, .1]); const st = part(B.CreateCylinder('as', { height: .04, diameter: .01 }, S)); st.position.y = .11; st.material = m([.3, .2, .1]); const lf = part(B.CreateBox('al', { width: .04, height: .005, depth: .025 }, S)); lf.position.set(.02, .115, 0); lf.material = m([.3, .6, .2]) }
+    else if (type === 'beans') { const c = part(B.CreateCylinder('bc', { height: .11, diameter: .08, tessellation: 10 }, S)); c.position.y = .055; c.material = m([.75, .75, .78]); const lb = part(B.CreateCylinder('bl', { height: .07, diameter: .084, tessellation: 10 }, S)); lb.position.y = .055; lb.material = m([.8, .3, .15]) }
+    else if (type === 'thermos') { const c = part(B.CreateCylinder('tc', { height: .24, diameter: .08, tessellation: 10 }, S)); c.position.y = .12; c.material = m([.2, .45, .75]); const cap = part(B.CreateCylinder('tp', { height: .05, diameter: .075, tessellation: 10 }, S)); cap.position.y = .265; cap.material = m([.85, .85, .88]) }
+    else if (type === 'waterBottle') { const c = part(B.CreateCylinder('wb', { height: .2, diameter: .065, tessellation: 10 }, S)); c.position.y = .1; c.material = m([.55, .8, .95]); const cap = part(B.CreateCylinder('wc', { height: .03, diameter: .04, tessellation: 8 }, S)); cap.position.y = .215; cap.material = m([.2, .3, .6]) }
+    else if (type === 'firstAid') { const b = part(B.CreateBox('fa', { width: .2, height: .13, depth: .08 }, S)); b.position.y = .065; b.material = m([.9, .9, .9]); const h = part(B.CreateBox('fh', { width: .07, height: .02, depth: .085 }, S)); h.position.y = .1; h.material = m([.85, .1, .1]); const v = part(B.CreateBox('fv', { width: .02, height: .07, depth: .085 }, S)); v.position.y = .075; v.material = m([.85, .1, .1]) }
+    else if (type === 'bandage') { const r = part(B.CreateTorus('bg', { diameter: .09, thickness: .035, tessellation: 12 }, S)); r.position.y = .035; r.material = m([.92, .88, .78]); const t2 = part(B.CreateBox('bt', { width: .1, height: .004, depth: .03 }, S)); t2.position.set(.07, .004, 0); t2.material = m([.92, .88, .78]) }
+    else if (type === 'herb') { for (let i = 0; i < 5; i++) { const l = part(B.CreateBox('hb', { width: .12, height: .004, depth: .035 }, S)); l.position.set(0, .03 + i * .004, 0); l.rotation.y = i * 1.25; l.rotation.z = .25; l.material = m([.25 + i * .02, .6, .2]) } const f = part(B.CreateSphere('hf', { diameter: .04, segments: 4 }, S)); f.position.y = .05; f.material = m([.8, .5, .85]) }
+    else if (type === 'crystal') { for (const [dx, dz, hh, rz] of [[0, 0, .2, 0], [.05, .02, .13, .35], [-.05, -.02, .11, -.3]]) { const c = part(B.CreateCylinder('cr', { height: hh, diameterTop: 0, diameterBottom: .06, tessellation: 5 }, S)); c.position.set(dx, hh / 2, dz); c.rotation.z = rz; c.material = m([.35, .8, 1]) } }
     else { [-.05, .05].forEach(z => { const b = part(B.CreateCylinder('bn', { height: .2, diameter: .08 }, S)); b.rotation.z = Math.PI / 2; b.position.z = z; b.material = m([.2, .22, .26]) }) }
     return root;
-  }
+}
+export const ITEM_KEYS = Object.keys(ITEM_DEFS); // the index in this list (+1) is what travels in a player's state packet as the held item
+export const HELD_POSE = { /* how each item sits in a hand: [rotation z, rotation x, y offset, scale] (long things hang along the arm) */ snack: [1.4, 0, -.04, 1.4], jerky: [1.5, 0, -.02, 1.4], handWarmer: [0, 1.5, -.02, 1.5], piton: [1.6, 0, -.02, 1.4], chalk: [0, 0, -.03, 1.4], beans: [0, 0, -.04, 1.3], thermos: [0, 0, -.1, 1.1], waterBottle: [0, 0, -.08, 1.2], firstAid: [0, 0, -.05, 1.2], bandage: [0, 0, -.02, 1.6], herb: [0, 1.4, -.02, 1.6], apple: [0, 0, -.04, 1.3], berries: [0, 0, -.03, 1.3], mushroom: [0, 0, -.04, 1.4], honey: [0, 0, -.06, 1.2], energyDrink: [0, 0, -.08, 1.2], crystal: [0, 0, -.1, 1] };
+const DT = 1 / 240, G = 20; // small steps, so a hard throw cannot slip through a thin wall
+export class GroundItems {
+  constructor(scene, terrain, world, boxes = [], boxesFn = null) { this.scene = scene; this.t = terrain; this.W = world; this.boxes = boxes; this.boxesFn = boxesFn; // boxes: the cabin walls, which items bounce off
+    this.map = new Map(); this.acc = 0; this.onRest = null }
+  mesh(type) { return makeItemMesh(this.scene, type) }
   add(it) { // it: { id, type, x, y, z, vx, vy, vz, rest }
     if (this.map.has(it.id)) return; const o = { vx: 0, vy: 0, vz: 0, rest: false, age: 0, ...it, node: this.mesh(it.type), spin: Math.random() * 6.28 }; o.node.position.set(o.x, o.y, o.z); o.node.rotation.y = o.spin; this.map.set(o.id, o);
   }

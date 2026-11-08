@@ -17,7 +17,7 @@ export function buildSite(scene, props, t, st) {
     cyl(.8, .55, f.x, h + .55, f.z, M.flame, 0, 8); cyl(.5, .3, f.x, h + .45, f.z, M.flame2, 0, 8); circles.push({ x: f.x, z: f.z, r: .7, top: h + .35 });
   };
   const bed = (b) => { box(1.9, .12, .75, b.x, h + .08, b.z, M.bed); box(.4, .14, .6, b.x - .7, h + .2, b.z, M.canvas) };
-  const prism = (x, z, len, wid, hei, mat) => { const p = B.CreateCylinder('tent', { height: 1, diameter: 6, tessellation: 3 }, scene); p.rotation.z = Math.PI / 2; p.scaling.set(hei / 4.5, len, wid / 5.196); return add(p, mat, x, h + 1.5 * hei / 4.5, z) };
+  const prism = (x, z, len, wid, hei, mat) => { const p = B.CreateCylinder('tent', { height: 1, diameter: 6, tessellation: 3 }, scene); p.rotation.z = Math.PI / 2; p.scaling.set(hei / 4.5, len, wid / 5.196); p.metadata = { shelter: true }; return add(p, mat, x, h + 1.5 * hei / 4.5, z) };
   switch (st.type) {
     case 'hut': {
       const hv = V(1, 3), c = makeCabin(scene, M, { x: st.x, z: st.z, h, hw: st.hw, hd: st.hd, door: st.door, wallH: 3, roofMat: M.roofs[hv], chimney: hv !== 0, windows: true }); kids.push(...c.kids); boxes.push(...c.boxes);
@@ -32,7 +32,7 @@ export function buildSite(scene, props, t, st) {
       const T = .25, ds = st.door === 'W' ? -1 : 1, bx = st.x - ds * st.hw, top = h + 5;
       box(T, 2.6, 2 * st.hd, bx, h + 1.3, st.z, M.wood); boxes.push({ minX: bx - T / 2, maxX: bx + T / 2, minZ: st.z - st.hd, maxZ: st.z + st.hd, top });
       for (const sz of [-1, 1]) { const wz = st.z + sz * st.hd; box(2 * st.hw, 2.6, T, st.x, h + 1.3, wz, M.wood); boxes.push({ minX: st.x - st.hw, maxX: st.x + st.hw, minZ: wz - T / 2, maxZ: wz + T / 2, top }) }
-      const r = box(2 * st.hw + .8, .18, 2 * st.hd + .8, st.x, h + 2.7, st.z, M.roof); crate(st.crate); break; }
+      const r = box(2 * st.hw + .8, .18, 2 * st.hd + .8, st.x, h + 2.7, st.z, M.roof); r.metadata = { shelter: true }; crate(st.crate); break; }
     case 'camp': fire(st.fire); bed({ x: st.cp.x, z: st.cp.z }); prism(st.tent.x, st.tent.z, 2.8, 2.4, 1.7, M.canvas); boxes.push({ minX: st.tent.x - 1.4, maxX: st.tent.x + 1.4, minZ: st.tent.z - 1.2, maxZ: st.tent.z + 1.2, top: h + 1.7 });
       for (const [dx, dz] of [[-1.3, 1.6], [1.5, -1.5]]) { const l = cyl(1.3, .32, st.x + dx, h + .17, st.z + dz, M.bark); l.rotation.z = Math.PI / 2; l.rotation.y = dx * .6 } break;
     case 'cache': crate(st.crate); break;
@@ -51,6 +51,28 @@ export function buildSite(scene, props, t, st) {
       cyl(3.2, .1, st.x - f * 2.2, h + 1.6, st.z - 1.3, M.bark, .07, 6); const fl = B.CreatePlane('flag', { width: .8, height: .5 }, scene); fl.rotation.y = Math.PI / 2; add(fl, M.flags[st.s % 5], st.x - f * 2.2, h + 2.9, st.z - 1.3 - .4); break; }
     case 'cairn': { const n = 5 + V(3, 3); for (let k = 0; k < n; k++) { const w = 1.15 - k * (.8 / n), ht = .22 + .04 * (k % 2); box(w, ht, w * .85, st.x + (k % 2 ? .05 : -.05), h + ht / 2 + k * .22, st.z, M.stone).rotation.y = k * .9 + t.rnd(st.s, 78 + k, 737) } circles.push({ x: st.x, z: st.z, r: .7, top: h + n * .22, stand: true }); break; }
     case 'stump': { const sh = .55 + t.rnd(st.s, 79, 738) * .35; cyl(sh, 1.15, st.x, h + sh / 2, st.z, M.bark, .85, 9); cyl(.06, .8, st.x, h + sh + .02, st.z, M.plank, .8, 9); cyl(.35, .25, st.x + 1.3, h + .13, st.z + .5, M.bark, .25, 7).rotation.z = Math.PI / 2; circles.push({ x: st.x, z: st.z, r: .6, top: h + sh, stand: true }); break; }
+    case 'mine': { /* timbered galleries with rails, then a cavern of glowing crystals, then an icy vault; lamps all the way. The rock itself is made of features (features.js). */
+      const m = st.mine, mk = (c, e) => { const x = new BABYLON.StandardMaterial('cry', scene); x.emissiveColor = new BABYLON.Color3(...e); x.diffuseColor = new BABYLON.Color3(...c); x.specularColor = BABYLON.Color3.Black(); x.alpha = .92; return x }, cm = mk([.3, .6, .9], [.2, .55, 1]), im = mk([.6, .85, 1], [.45, .8, 1]), hy = Math.atan(m.slope), yaw = -Math.atan2(m.az, m.ax);
+      const P = (u, w) => [m.x0 + m.ax * u - m.az * w, m.z0 + m.az * u + m.ax * w, m.y0 + m.slope * u], H = (u) => Math.min(1, u / m.len);
+      for (const c of st.crates) crate(c);
+      const Lp = m.len / m.n, rr = (j, k) => { const v = Math.sin((j + 1) * 12.9898 + k * 78.233 + st.s * 3.1) * 43758.5453; return v - Math.floor(v) };
+      for (let j = 1; j < m.n - 1; j++) { const ty = m.zt[j], bg = m.big[j], u0 = j * Lp, hw = bg ? m.bigW - 1 : 2.4;
+        if (ty === 'timber') { for (const u of [u0 + Lp * .25, u0 + Lp * .75]) { const [px, pz, py] = P(u, 0); for (const sw of [-1, 1]) { const [a, b] = P(u, sw * 2.5); cyl(3.3, .28, a, py + 1.65, b, M.bark, .24, 6) } const bm = box(.3, .3, 5.6, px, py + 3.3, pz, M.bark); bm.rotation.y = yaw + Math.PI / 2 }
+          for (const sw of [-.7, .7]) { const [a, b] = P(u0 + Lp / 2, sw); const r = box(Lp, .08, .1, a, m.y0 + m.slope * (u0 + Lp / 2) + .07, b, M.iron); r.rotation.y = yaw; r.rotation.z = hy } }
+        const cnt = bg ? 9 : 3;
+        for (let q = 0; q < cnt && ty !== 'timber'; q++) { const w = (rr(j, q) * 2 - 1) * hw, [a, b, yq] = P(u0 + rr(j, q + 20) * Lp, w), sc = bg ? 1.6 : 1, hh = (.5 + rr(j, q + 40) * 1.1) * sc;
+          if (ty === 'cave') cyl(hh, .45 * sc, a, yq + hh / 2, b, M.stone, 0, 6).rotation.z = (rr(j, q + 60) - .5) * .2; /* stalagmites */
+          else cyl(hh * (ty === 'ice' ? 1.4 : 1), (ty === 'ice' ? .55 : .35) * sc, a, yq + hh * (ty === 'ice' ? .7 : .5), b, ty === 'ice' ? im : cm, 0, 5).rotation.z = (rr(j, q + 60) - .5) * .5 } /* crystals / ice spikes */
+        if (ty !== 'ice' && ty !== 'crystal' || bg) { if (j % 2 === 0) { const [a, b, yl] = P(u0 + Lp / 2, hw - .1); box(.22, .3, .22, a, yl + (bg ? m.bigH * .6 : 2.9), b, M.glow) } } } /* a lamp now and then; crystal and ice glow by themselves */
+      { const [a, b, yc] = P(m.len * .2, -1.6); box(1.6, .5, .9, a, yc + .45, b, M.dark).rotation.y = yaw; box(1.5, .3, .8, a, yc + .8, b, M.wood).rotation.y = yaw } /* a mine cart */
+      for (const u of [0, m.len]) for (const sw of [-1, 1]) { const [a, b, yy] = P(u, sw * 3.4); cyl(4.2, .36, a, yy + 2.1, b, M.bark, .3, 6) } /* the timbers at each mouth */
+      break }
+    case 'summit': { box(2.6, .4, 2.6, st.x, h + .2, st.z, M.stone); box(1.9, .4, 1.9, st.x, h + .6, st.z, M.stone); box(1.2, .4, 1.2, st.x, h + 1.0, st.z, M.stone); circles.push({ x: st.x, z: st.z, r: 1.5, top: h + 1.2, stand: true }); cyl(7, .14, st.x + 1.4, h + 3.5, st.z, M.bark, .1, 6); const fl = box(2.2, 1.3, .03, st.x + 2.55, h + 6.1, st.z, M.flags[2]); box(.05, .05, 2.2, st.x + 1.4, h + 6.9, st.z, M.dark).rotation.y = 0; for (let k = 0; k < 8; k++) box(.5, .35, .03, st.x - 1.8 + (k % 4) * .3, h + 4 + (k >> 2) * .4, st.z + 1.6, M.flags[k % 5]); break }
+    case 'tent': { prism(st.x, st.z, 2.6, 2.2, 1.6, M.canvas); boxes.push({ minX: st.x - 1.3, maxX: st.x + 1.3, minZ: st.z - 1.1, maxZ: st.z + 1.1, top: h + 1.6 }); box(.5, .32, .4, st.x + 1.9, h + .16, st.z - .8, M.pack); const l = cyl(1.1, .26, st.x + 1.8, h + .14, st.z + .9, M.bark); l.rotation.z = Math.PI / 2; break }
+    case 'flowers': case 'herbs': for (const b of st.bits) { const fl = st.type === 'flowers'; cyl(.34, .025, b.x, b.y + .17, b.z, M.leaf, .02, 4); if (fl) add(B.CreateSphere('s', { diameter: .16, segments: 4 }, scene), M.flags[[1, 2, 4][b.c]], b.x, b.y + .38, b.z); else { cyl(.28, .3, b.x, b.y + .14, b.z, M.leaf, .02, 6) } } break;
+    case 'bones': { const a = st.ang; add(B.CreateSphere('s', { diameter: .3, segments: 5 }, scene), M.flags[1], st.x, h + .13, st.z); for (let k = 0; k < 5; k++) { const r = box(.04, .05, .7, st.x + Math.cos(a) * (.5 + k * .13), h + .06, st.z + Math.sin(a) * (.5 + k * .13), M.flags[1]); r.rotation.y = a + Math.PI / 2 + (k % 2 ? .35 : -.35) } box(.05, .05, 1.2, st.x + Math.cos(a) * .8, h + .04, st.z + Math.sin(a) * .8, M.flags[1]).rotation.y = -a; break }
+    case 'shrine': { box(1.1, .3, 1.1, st.x, h + .15, st.z, M.stone); box(.8, .3, .8, st.x, h + .45, st.z, M.stone); box(.55, .3, .55, st.x, h + .75, st.z, M.stone); circles.push({ x: st.x, z: st.z, r: .75, top: h + .9, stand: true }); cyl(2.2, .08, st.x + .9, h + 1.1, st.z, M.bark, .08, 6); for (let k = 0; k < 4; k++) box(.4, .3, .02, st.x + .9, h + 2 - k * .3, st.z + .22, M.flags[k % 5]); break }
+    case 'boulders': for (const b of st.bits) { const y = t.rawHeight(b.x, b.z), s = add(B.CreateSphere('s', { diameter: b.r * 2, segments: 6 }, scene), M.stone, b.x, y + b.r * .35, b.z); s.scaling.y = .7; circles.push({ x: b.x, z: b.z, r: b.r * .85, top: y + b.r * .9, stand: true }) } break;
     case 'logPile': { const ang = st.ang || 0; for (let r2 = 0; r2 < 4; r2++) for (let k = 0; k < 4 - r2; k++) { const lg = cyl(1.9, .32, st.x + Math.cos(ang) * (-.4 + k * .34 + r2 * .17) + 0, h + .18 + r2 * .28, st.z + Math.sin(ang) * (-.4 + k * .34 + r2 * .17), M.bark, .32, 7); lg.rotation.x = Math.PI / 2; lg.rotation.y = -ang } circles.push({ x: st.x, z: st.z, r: 1.3, top: h + 1.0, stand: true }); break; }
     case 'berries': for (const b of st.bushes) { const m = props.P['bush' + Math.floor(t.rnd(st.s, 90, 721) * props.V.bush)].createInstance('b'); m.position.set(b.x, b.y - .05, b.z); m.scaling.setAll(1.3); m.rotation.y = b.x; m.freezeWorldMatrix(); kids.push(m) } break;
     case 'tunnel': { // timber frames at both mouths (the rock itself is a feature, see features.js), and the crate with a light

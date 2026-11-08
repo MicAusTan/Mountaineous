@@ -24,14 +24,23 @@ export function trailOff(r, z) { // sideways offset of the branch from the main 
   const u = (r.z0 - z) / (r.z0 - r.z1); if (u < 0 || u > 1) return null;
   return r.side * r.A * (r.kind === 'loop' ? Math.pow(Math.sin(Math.PI * u), 1.3) : ss(0, 1, u));
 }
+export function strayOff(t, k, z) { // stray paths (v3): two separate trails far off to each side that wander on their own, keep clear of cliff bands, and now and then pinch in and meet the main trail (and all come together near the top)
+  const d = -z; if (d < 500) return null;
+  const side = k ? -1 : 1, base = 170 + 330 * t.noise(d / 1300, 5.5 + k, 900 + k), start = ss(500, 1150, d), end = 1 - ss(t.length - 1000, t.length - 150, d);
+  const cell = Math.floor(d / 1900), zc = (cell + .3 + .4 * t.rnd(cell, k, 910 + k)) * 1900, bump = t.rnd(cell, k + 3, 920) < .3 ? 1 - ss(70, 240, Math.abs(d - zc)) : 0;
+  const f = Math.min(t.n - 1, Math.max(0, Math.floor((d - t.startFlat * .5) / t.STEP))), need = t.secs ? (side > 0 ? t.needP[f] : t.needM[f]) : 0;
+  return side * Math.max(base * start * (1 - bump), need) * end + 0 * 0;
+}
+export function trailNear(t, x, z) { const xs = trailXs(t, z); let bx = xs[0], bd = Math.abs(x - bx); for (const v of xs) { const d = Math.abs(x - v); if (d < bd) { bd = d; bx = v } } return { d: bd, x: bx } }
 export function trailDist(t, x, z, px = t.pathX(z)) { // distance (sideways) to the nearest trail, main or branch
-  let d = Math.abs(x - px); if (!t.tr) return d;
+  let d = Math.abs(x - px); if (t.v3) for (let k = 0; k < 2; k++) { const o = strayOff(t, k, z); if (o !== null) d = Math.min(d, Math.abs(x - px - o)) }
+  if (!t.tr) return d;
   const s0 = Math.floor((-z - TSTART) / TSEG);
   for (let s = s0 - 1; s <= s0 + 1; s++) { const r = trailRec(t, s); if (!r) continue; const o = trailOff(r, z); if (o !== null) d = Math.min(d, Math.abs(x - px - o)) }
   return d;
 }
 export function trailXs(t, z) { // x of every trail at this z
-  const px = t.pathX(z), out = [px]; if (!t.tr) return out;
+  const px = t.pathX(z), out = [px]; if (t.v3) for (let k = 0; k < 2; k++) { const o = strayOff(t, k, z); if (o !== null) out.push(px + o) } if (!t.tr) return out;
   const s0 = Math.floor((-z - TSTART) / TSEG);
   for (let s = s0 - 1; s <= s0 + 1; s++) { const r = trailRec(t, s); if (!r) continue; const o = trailOff(r, z); if (o !== null) out.push(px + o) }
   return out;

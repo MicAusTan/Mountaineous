@@ -31,7 +31,7 @@ html,body{margin:0;height:100%;overflow:hidden;font-family:system-ui,sans-serif;
 #energy{display:none;position:fixed;left:18px;bottom:18px;width:280px;pointer-events:none}
 #ebar{position:relative;height:18px;border-radius:5px;background:rgba(10,16,24,.78);border:1px solid rgba(255,255,255,.28);overflow:hidden}
 #efill{position:absolute;left:0;top:0;bottom:0;width:100%;background:#e9a23b;transition:background .2s}
-#energy.low #efill{background:#d6453d;animation:pulse .6s infinite alternate}
+#energy.low #efill{animation:none}#energy.exh #efill{animation:pulse .9s infinite alternate}
 #eaff{position:absolute;inset:0;pointer-events:none;z-index:1}
 #eaff span{position:absolute;top:0;bottom:0}
 #ereserve{display:none;height:5px;margin-top:3px;border-radius:3px;background:rgba(10,16,24,.7);overflow:hidden}#ereserve i{display:block;height:100%;width:0;background:#7ee0ff}
@@ -42,6 +42,11 @@ html,body{margin:0;height:100%;overflow:hidden;font-family:system-ui,sans-serif;
 .screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:12px;overflow:auto}
 #menu{background:linear-gradient(#26364a,#6d8aa6 55%,#c9b79c)}
 #pause{background:#0007;display:none}
+#dead{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;background:rgba(40,0,0,.62);color:#fff;z-index:20;text-align:center}#dead h2{font-size:42px;margin:0 0 6px;letter-spacing:2px}#dead p{margin:4px 0;opacity:.9}#deadBtn{display:none;margin-top:14px;padding:8px 18px;border:0;border-radius:8px;background:#e9a23b;font-weight:700;cursor:pointer}
+#sleepov{position:fixed;inset:0;display:none;align-items:flex-end;justify-content:center;background:#02040c;color:#cfe0ff;z-index:5;padding-bottom:70px;pointer-events:none;font-size:15px;text-align:center}
+#summit{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;background:radial-gradient(#ffe9a855,#0008);color:#fff;z-index:20;text-align:center;cursor:pointer}#summit h2{font-size:54px;margin:0;text-shadow:0 2px 12px #000}#summit p{font-size:20px;text-shadow:0 1px 6px #000}
+#escHint{opacity:.55;transition:opacity .4s;font-size:12px;text-align:center;margin:6px 0}
+#hud{z-index:6}
 .card{width:340px;max-width:100%;max-height:calc(100vh - 24px);overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px}
 h1{margin:0;font-size:26px;letter-spacing:.5px}.sub{margin:2px 0 14px;color:var(--mute);font-size:13px}
 .tabs{display:flex;gap:4px;margin-bottom:12px}
@@ -79,7 +84,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 <div id="energy"><div id="ebar"><i id="efill"></i><div id="eaff"></div></div><div id="ereserve"><i></i></div><span id="elabel">Energy</span><span id="ewhy"></span></div>
 <div id="hotbar"></div><div id="hotname"></div><div id="binos"></div><div id="underwater"></div><div id="prompt"></div><div id="use"><div id="useFill"></div></div><div id="throw"><div id="throwFill"></div></div><div id="zoomv"></div>
 <div id="nav"><span id="arrow">&#9650;</span><small>summit</small></div>
-<div id="hint">1-4: items · Left click: use the held item (hold to confirm), or grab / climb with empty hands · E: pick up / rest · Q: drop (hold to throw) · G: emotes · R: ragdoll · Right click: reach out · Deep water: swim, hold C to dive</div>
+<div id="hint">Z: sleep at a bed or fire · 1-4: items · Left click: use the held item (hold to confirm), or grab / climb with empty hands · E: pick up / rest · Q: drop (hold to throw) · G: emotes · R: ragdoll · Right click: reach out · Deep water: swim, hold C to dive</div>
 <div id="wheel"><svg id="wsvg" viewBox="0 0 320 320" width="320" height="320"></svg><div id="wnav"><button data-page="-1" aria-label="Previous page">&#8249;</button><span id="wpage"></span><button data-page="1" aria-label="Next page">&#8250;</button></div><div id="whint">Right-click &ldquo;Picture&rdquo; to change its image</div></div><div id="wcur"></div>
 <div id="menu" class="screen"><div class="card">
   <h1>Mountain</h1><p class="sub">Walk to the summit. Bring friends.</p>
@@ -95,7 +100,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
       <div class="row"><label for="step">Cliff step height</label><select id="step"><option value="8">Low (steps are small in general)</option><option value="12">Medium</option><option value="16">Tall</option><option value="22">Huge (needs a full energy bar)</option></select><div class="hint">How tall cliff steps usually are. Each one still varies, and now and then you get a much bigger one. Steps have ledges to rest on; some have a sheer, unclimbable middle.</div>
       </div>
       <div class="row"><label for="sites">Things along the trail</label><select id="sites"><option value="0">None</option><option value="0.5">Few</option><option value="1" selected>Normal</option><option value="1.8">Lots</option></select><div class="hint">Huts, camps, fallen trees, berry bushes, hot springs and more. Natural things are common, buildings and scenarios are rarer. Loot is mostly in the buildings.</div></div>
-      <div class="row"><label for="hunger">Hunger</label><select id="hunger"><option value="0">Off</option><option value="0.5">Slow</option><option value="1" selected>Normal</option><option value="2">Fast</option></select><div class="hint">You get hungrier over time (faster when climbing), which takes away part of your energy bar. Food puts it back.</div></div>
+      <div class="row"><label for="hunger">Hunger</label><select id="hunger"><option value="0">Off</option><option value="0.5">Slow</option><option value="1" selected>Normal</option><option value="2">Fast</option></select><div class="hint">You get hungrier in steps as time passes (faster when climbing), which takes away part of your energy bar. Food puts it back.</div></div>
+      <div class="row"><label for="death">When someone dies</label><select id="death"><option value="revive" selected>Revive at the next checkpoint</option><option value="restart">Restart from the base</option></select><div class="hint">Energy is your health: if cold, hunger and injuries use it all up you die. Revive: friends who rest at a checkpoint bring you back there (alone, you return to your last one). Restart: you start over at the cabin.</div></div>
       <div class="row"><label for="spawn">Late joiners spawn</label><select id="spawn"><option value="base">At the base</option><option value="host">Next to the host</option></select></div>
       <div class="row"><label for="grab">Grabbing</label><select id="grab">
         <option value="helpful">Helpful only (reach out to pull friends)</option>
@@ -112,8 +118,11 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
     <button class="go" id="joinBtn">Join</button><div class="hint" id="joinMsg"></div>
   </div>
 </div></div>
+<div id="dead"><h2>YOU DIED</h2><p id="deadMsg"></p><p id="deadSub"></p><button id="deadBtn">Respawn at my last checkpoint</button></div>
+<div id="sleepov"><span id="sleepMsg"></span></div>
+<div id="summit"><h2>&#9968; SUMMIT!</h2><p id="sumTxt"></p><p>You made it to the top of the mountain. (click to continue)</p></div>
 <div id="pause" class="screen"><div class="card">
-  <h1 style="text-align:center">Paused</h1><p class="sub" style="text-align:center">WASD move · Shift sprint · Space jump · left click uses items · E pick up · Q drop/throw · wheel: zoom · Esc/Enter resumes</p>
+  <h1 style="text-align:center">Paused</h1><p class="sub" style="text-align:center">WASD move · Shift sprint · Space jump · left click uses items · E pick up · Q drop/throw · wheel: zoom · Z sleep at a bed or fire</p><p class="sub" id="escHint" style="text-align:center">To resume: click outside this card, press Enter, or click Resume. (Browsers don't allow Esc to re-enter the game.)</p>
   <div class="row"><label for="fov">Field of view: <span id="fovV"></span>&deg;</label><input id="fov" type="range" min="50" max="110"></div>
   <div class="row"><label for="vol">Sound volume: <span id="volV"></span></label><input id="vol" type="range" min="0" max="1" step="0.05"></div>
   <div class="row"><label for="sens">Mouse sensitivity: <span id="sensV"></span>&times;</label><input id="sens" type="range" min="0.2" max="3" step="0.1"></div>

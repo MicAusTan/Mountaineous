@@ -22,15 +22,16 @@ export function makeCabin(scene, M, o) {
   const dx0 = door === 'W' ? X0 : X1 - T, dx1 = door === 'W' ? X0 + T : X1, fx0 = door === 'W' ? X1 - T : X0, fx1 = door === 'W' ? X1 : X0 + T;
   wall(fx0, fx1, Z0 + T, Z1 - T); wall(dx0, dx1, Z0 + T, z - gap); wall(dx0, dx1, z + gap, Z1 - T); // the plain end wall, and the door end with a gap
   box(T, wallH - doorH, 2 * gap, (dx0 + dx1) / 2, h + doorH + (wallH - doorH) / 2, z, M.wood); // above the door
-  box(2 * hw - 2 * T, .04, 2 * hd - 2 * T, x, h + .02, z, M.plank); box(2 * hw, .25, 2 * hd, x, h + wallH + .1, z, M.plank);
+  box(2 * hw - 2 * T, .04, 2 * hd - 2 * T, x, h + .02, z, M.plank); box(2 * hw, .25, 2 * hd, x, h + wallH + .1, z, M.plank).metadata = { shelter: true };
   const ha = 2.4, sx = ha / 4.5, roof = BABYLON.MeshBuilder.CreateCylinder('roof', { height: 1, diameter: 6, tessellation: 3 }, scene); // a triangular prism: base on the ceiling, ridge along x
-  roof.rotation.z = Math.PI / 2; roof.scaling.set(sx, 2 * hw + .9, (hd + .4) / 2.598); roof.position.set(x, h + wallH + .225 + 1.5 * sx, z); roof.material = roofMat; roof.freezeWorldMatrix(); kids.push(roof);
+  roof.rotation.z = Math.PI / 2; roof.scaling.set(sx, 2 * hw + .9, (hd + .4) / 2.598); roof.position.set(x, h + wallH + .225 + 1.5 * sx, z); roof.material = roofMat; roof.metadata = { shelter: true }; roof.freezeWorldMatrix(); kids.push(roof);
   if (windows) { const wy = h + wallH * .52, n = hw >= 3.5 ? 2 : 1; // glass panes on both faces of the long walls (the wall itself stays solid)
     for (const sz of [-1, 1]) for (let k = 0; k < n; k++) { const wx = n === 1 ? x + (sz > 0 ? -hw * .3 : hw * .3) : x + (k ? 1 : -1) * hw * .42; for (const face of [0, 1]) { const zz = z + sz * (hd - (face ? T + .012 : -.012)); box(1.05, .85, .05, wx, wy, zz, M.glass); box(1.2, .05, .07, wx, wy + .47, zz, M.dark); box(1.2, .05, .07, wx, wy - .47, zz, M.dark); box(.05, .85, .07, wx, wy, zz, M.dark) } } }
   if (chimney) { const ex = door === 'W' ? X1 + .32 : X0 - .32, ch = wallH + 2.9; box(.95, ch, 1.1, ex, h + ch / 2, z, M.stone); box(1.1, .12, 1.25, ex, h + ch + .06, z, M.dark); boxes.push({ minX: ex - .48, maxX: ex + .48, minZ: z - .55, maxZ: z + .55, top }) }
   return { kids, boxes };
 }
-export function buildHouse(scene, terrain) { // the starter cabin: spawn here in a new world; the starting gear is on the counter
+export function buildHouse(scene, terrain, rot = false) {
+  const n0 = scene.meshes?.length ?? 0; // the starter cabin: spawn here in a new world; the starting gear is on the counter
   const hx = HOUSE.x, hz = HOUSE.z, hy = terrain.height(hx, hz), M = cabinMats(scene), c = makeCabin(scene, M, { x: hx, z: hz, h: hy, hw: 4, hd: 3, door: 'W', wallH: 4, roofMat: M.roofs[0], chimney: true }), colliders = [...c.boxes], B = BABYLON.MeshBuilder;
   const put = (w, h, d, x, y, z, m, top = 0) => { const b = B.CreateBox('f', { width: w, height: h, depth: d }, scene); tileBox(b, w, h, d, 1.2); b.position.set(x, y, z); b.material = m; b.freezeWorldMatrix(); if (top) colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, top: hy + top }); return b };
   const round = (h, d, x, y, z, m, dt = d, tess = 10) => { const b = B.CreateCylinder('f', { height: h, diameterTop: dt, diameterBottom: d, tessellation: tess }, scene); b.position.set(x, y, z); b.material = m; b.freezeWorldMatrix(); return b };
@@ -47,5 +48,13 @@ export function buildHouse(scene, terrain) { // the starter cabin: spawn here in
   round(.28, .5, hx - 3.3, hy + .14, hz + 2.2, M.bark, .55, 9); round(.28, .5, hx - 3.3, hy + .42, hz + 2.2, M.bark, .55, 9); // a pair of firewood rounds by the door
   const lamp = new BABYLON.PointLight('cabin', new BABYLON.Vector3(hx, hy + 3.2, hz), scene); lamp.diffuse = new BABYLON.Color3(1, .82, .55); lamp.intensity = .45; lamp.range = 9; // a warm light inside so it's never pitch black
   const loot = [['snack', hx - .7, hy + .83, hz + 1.5], ['snack', hx + .2, hy + .83, hz + 1.7], ['chalk', hx + 1.0, hy + 1.67, hz + 2.5], ['jerky', hx + 1.9, hy + 1.67, hz + 2.5]].map(([type, x, y, z], i) => ({ id: 'cabin-loot' + i, type, x, y, z, rest: true }));
-  return { colliders, counter: { x: cx, y: hy + .86, z: hz }, spawn: { x: hx - 1.6, z: hz, yaw: Math.PI / 2 }, loot };
+  const R = rot ? ((x, z) => [hx - (z - hz), hz + (x - hx)]) : ((x, z) => [x, z]); /* turn the whole cabin a quarter turn about its middle, so its door faces the mountain (-z) */
+  if (rot) {
+    for (const m of scene.meshes.slice(n0)) { m.unfreezeWorldMatrix(); const [nx, nz] = R(m.position.x, m.position.z); m.position.x = nx; m.position.z = nz; m.rotation.y -= Math.PI / 2; m.freezeWorldMatrix() }
+    lamp.position.x = R(lamp.position.x, lamp.position.z)[0]; lamp.position.z = R(hx, hz)[1] + 0;
+    for (let i = 0; i < colliders.length; i++) { const b = colliders[i], p = [R(b.minX, b.minZ), R(b.maxX, b.maxZ)]; colliders[i] = { minX: Math.min(p[0][0], p[1][0]), maxX: Math.max(p[0][0], p[1][0]), minZ: Math.min(p[0][1], p[1][1]), maxZ: Math.max(p[0][1], p[1][1]), top: b.top } }
+    for (const l of loot) { const [nx, nz] = R(l.x, l.z); l.x = nx; l.z = nz }
+  }
+  const [px, pz] = R(cx, hz), [sx, sz] = R(hx + 1.6, hz), [bx, bz] = R(hx - 1.5, hz - 2.2);
+  return { colliders, counter: { x: px, y: hy + .86, z: pz }, spawn: rot ? { x: sx, z: sz, yaw: Math.PI } : { x: hx - 1.6, z: hz, yaw: Math.PI / 2 }, loot, rest: { x: bx, z: bz, y: hy }, off: rot ? (dx, dz) => [-dz, dx] : (dx, dz) => [dx, dz] /* a local offset (along the counter) in world axes */ };
 }

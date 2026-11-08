@@ -3,7 +3,7 @@ import { makeProps, DECOR, COLLIDE, TILT } from './props.js';
 import { makeWaterMaterial } from './waterMat.js';
 import { buildSite } from './siteMeshes.js';
 import { makeTerrainMaterial } from './terrainMat.js';
-import { caveShade, featureD, solidD, topSurface, grip, climbMove, pushOut } from './features.js';
+import { caveShade, mineTint, featureD, solidD, topSurface, grip, climbMove, pushOut } from './features.js';
 import { surfaceNets } from './surfaceNets.js';
 const ROCK = [.45, .44, .43], SAND = [.78, .7, .5], CS = 64; // chunk size (m)
 const LAYER = [[1,0,0,0],[1,0,0,0],[0,1,0,.15],[0,0,0,1],[0,0,1,0],[1,0,0,0],[1,0,0,0],[.6,0,0,.4]]; // per biome: [grass, sand, snow, rock] ground layers
@@ -108,7 +108,7 @@ export class Chunks {
     const m = surfaceNets((x, y, z) => featureD(t, f, x, y, z), b, res); if (!m.idx.length) return;
     const n = m.pos.length / 3, lay = new Array(n * 4), tin = new Array(n * 3), uv = new Array(n * 2).fill(0);
     for (let v = 0; v < n; v++) { lay[v * 4] = 0; lay[v * 4 + 1] = 0; lay[v * 4 + 2] = 0; lay[v * 4 + 3] = 1; const j = .9 + .2 * t.rnd(Math.round(m.pos[v * 3] * 2), Math.round(m.pos[v * 3 + 2] * 2), 6); tin[v * 3] = ROCK[0] * j; tin[v * 3 + 1] = ROCK[1] * j; tin[v * 3 + 2] = ROCK[2] * j }
-    if (f.cave) for (let v = 0; v < n; v++) { const dk = caveShade(f, m.pos[v * 3], m.pos[v * 3 + 1], m.pos[v * 3 + 2]); if (dk > 0) { const k = 1 - .86 * dk; tin[v * 3] *= k; tin[v * 3 + 1] *= k; tin[v * 3 + 2] *= k } } // deeper in a cave = darker rock
+    if (f.cave) for (let v = 0; v < n; v++) { const dk = caveShade(f, m.pos[v * 3], m.pos[v * 3 + 1], m.pos[v * 3 + 2]); if (dk > 0) { const k = 1 - .86 * dk, mt = f.cave.mine ? mineTint(f, m.pos[v * 3], m.pos[v * 3 + 2]) : null; if (mt) { tin[v * 3] *= mt[0]; tin[v * 3 + 1] *= mt[1]; tin[v * 3 + 2] *= mt[2] } tin[v * 3] *= k; tin[v * 3 + 1] *= k; tin[v * 3 + 2] *= k } } // deeper in a cave = darker rock
     const mesh = new BABYLON.Mesh('rock', this.scene), vd = new BABYLON.VertexData(); Object.assign(vd, { positions: m.pos, indices: m.idx, normals: m.nor, colors: lay, uvs: uv }); vd.applyToMesh(mesh);
     mesh.setVerticesData('tint', tin, false, 3); mesh.material = this.mat; mesh.freezeWorldMatrix(); kids.push(mesh); if (f.cave) this.caveFloor(f, kids);
     for (let q = 0; q < (f.cave ? 0 : 3); q++) { // fallen rubble under the tip (not at cave and tunnel mouths: it would block them)

@@ -54,7 +54,7 @@ function placeFree(t, cx, cz, R) {
   const ox = cx * FCS, oz = cz * FCS;
   for (let a = 0; a < 3; a++) {
     const o = 100 + a * 30, x = ox + 8 + R(o + 1) * (FCS - 16), z = oz + 8 + R(o + 2) * (FCS - 16);
-    if (t.progress(z) < .03 || t.trailDist(x, z) < 18 || Math.hypot(x - t.house.x, z - t.house.z) < 45 || t.waterAt(x, z) !== null || t.shore(x, z) > .02 || t.stepAt(x, z)) continue;
+    if (t.progress(z) < .03 || t.trailDist(x, z) < 18 || Math.hypot(x - t.house.x, z - t.house.z) < 45 || t.waterAt(x, z) !== null || t.shore(x, z) > .02 || t.stepAt(x, z) || (t.v3 && t.scn && t.siteClear(x, z))) continue;
     const g = Math.hypot(t.height(x + 2, z) - t.height(x - 2, z), t.height(x, z + 2) - t.height(x, z - 2)) / 4; if (g > 1) continue;
     const prims = []; let kind;
     if (t.cv && R(o + 3) < .55) { // cave: a rock mound with a tunnel and a round chamber carved out of it; the entrance faces the trail
@@ -87,7 +87,7 @@ function placeFree(t, cx, cz, R) {
 
 // Which features sit in cell (cx,cz)? One per cell at most, on steep ground off the trail.
 export function placeFeatures(t, cx, cz) {
-  const out = placeBase(t, cx, cz); if (t.scn && t.cv && t.gen >= 2) for (const st of sitesNear(t, (cx + .5) * FCS, (cz + .5) * FCS, FCS)) if (st.type === 'tunnel' && Math.floor(st.x / FCS) === cx && Math.floor(st.z / FCS) === cz) out.push(tunnelFeature(t, st)); // trail tunnels
+  const out = placeBase(t, cx, cz); if (t.scn && t.cv && t.gen >= 2) { for (const st of sitesNear(t, (cx + .5) * FCS, (cz + .5) * FCS, t.v3 ? FCS + 330 : FCS)) { if (st.type === 'tunnel' && Math.floor(st.x / FCS) === cx && Math.floor(st.z / FCS) === cz) out.push(tunnelFeature(t, st)); else if (st.type === 'mine') for (let j = 0; j < st.mine.n; j++) { const m = st.mine, Lp = m.len / m.n, u = (j + .5) * Lp, px = m.x0 + m.ax * u, pz = m.z0 + m.az * u; if (Math.floor(px / FCS) === cx && Math.floor(pz / FCS) === cz) out.push(tunnelFeature(t, { s: st.s * 100 + j, tunnel: (() => { const bg = m.big[j], tw = bg ? m.bigW : 2.7, th = bg ? m.bigH : 3.5; return { x: px, z: pz, ax: m.ax, az: m.az, L: Lp + 1, y0: m.y0 + m.slope * u, slope: m.slope, bw: tw + 4.9, bh: th + 1.7, tw, th } })(), mineInfo: { x0: m.x0, z0: m.z0, ax: m.ax, az: m.az, total: m.len, n: m.n, zt: m.zt, big: m.big } })) } } } // trail tunnels
   return out;
 }
 function placeBase(t, cx, cz) {
@@ -199,16 +199,22 @@ export function shelterTop(t, x, z) { // height of the highest rock above column
 
 // Caves: how dark the rock surface at (x,y,z) should be (0 outside / at the entrance, 1 deep inside), so the inside looks like a cave without any real lighting.
 export function caveShade(f, x, y, z) {
-  if (!f.cave) return 0; let cut = 1e9; for (const p of f.prims) if (isCut(p)) cut = Math.min(cut, cutOne(p, x, y, z)); if (cut > 1.2) return 0;
+  if (!f.cave) return 0; if (f.cave.mine) { let c2 = 1e9; for (const p of f.prims) if (isCut(p)) c2 = Math.min(c2, cutOne(p, x, y, z)); if (c2 > 1.2) return 0; const m = f.cave.mine, lx = (x - m.x0) * m.ax + (z - m.z0) * m.az, d = Math.min(lx, m.total - lx), u = Math.max(0, Math.min(1, d / 16)); return u * u * (3 - 2 * u) } /* a mine is dark all the way along, bright only at its two mouths */
+  let cut = 1e9; for (const p of f.prims) if (isCut(p)) cut = Math.min(cut, cutOne(p, x, y, z)); if (cut > 1.2) return 0;
   const lx = (x - f.cave.x) * f.cave.ax + (z - f.cave.z) * f.cave.az, d = f.cave.sym ? f.cave.len - Math.abs(lx) : f.cave.len - lx, u = Math.max(0, Math.min(1, d / 5)); return u * u * (3 - 2 * u); // sym: a tunnel is dark in the middle and bright at both mouths
 }
 
 // A tunnel the trail runs through (a scenario from sites.js): a block of rock across the trail with a tube cut along it, tilted to follow the slope.
 function tunnelFeature(t, st) {
-  const { x, z, ax, az, L, y0, slope } = st.tunnel, th = Math.atan(slope), cp = Math.cos(th), sp = Math.sin(th);
+  const { x, z, ax, az, L, y0, slope } = st.tunnel, TW = st.tunnel.tw || 1.9, TH = st.tunnel.th || 3, BW = st.tunnel.bw || 6.5, BH = st.tunnel.bh || 4.3, th = Math.atan(slope), cp = Math.cos(th), sp = Math.sin(th);
   const f = [ax * cp, sp, az * cp], w = [az, 0, -ax], v = [-ax * sp, cp, -az * sp], at = (k) => [x + v[0] * k, y0 + v[1] * k, z + v[2] * k];
   const mk = (k, hf, hw, hv, r, cut) => { const c = at(k); return { k: 5, x: c[0], y: c[1], z: c[2], f, w, v, hf, hw, hv, r, cut, hy: Math.hypot(hf, hw, hv) + r } };
-  const prims = [mk(1.4, L / 2 + 1.4, 6.5, 4.3, 2.2, false), mk(.6, L / 2 + 10, 1.9, 3.0, .5, true)]; // the rock block, and the tube through it (much longer than the block: a short tube leaves lumpy bits of rock floating at its mouth)
+  const prims = [mk(1.4 + (BH - 4.3) * .5, L / 2 + 1.4, BW, BH, 2.2, false), mk(.6 + (TH - 3) * .5, L / 2 + 10, TW, TH, .5, true)]; // the rock block, and the tube through it (much longer than the block: a short tube leaves lumpy bits of rock floating at its mouth)
   const bb = bound(prims);
-  return { prims, bb, k: Math.floor(t.rnd(st.s, 1, 730) * 1e6), x, z, h: y0, ux: 1, uz: 0, kind: 6, tip: [x + ax * (L / 2 + 2), z + az * (L / 2 + 2)], cave: { x, z, ax, az, len: L / 2, sym: true, rects: [[-L / 2, L / 2, 1.7, 0]] } };
+  return { prims, bb, k: Math.floor(t.rnd(st.s, 1, 730) * 1e6), x, z, h: y0, ux: 1, uz: 0, kind: 6, tip: [x + ax * (L / 2 + 2), z + az * (L / 2 + 2)], cave: { x, z, ax, az, len: L / 2, sym: true, mine: st.mineInfo || null, rects: [[-L / 2, L / 2, TW - .2, 0]] } };
 }
+
+// A mine is made of zones (timber gallery, natural cave, crystal cavern, ice vault) that each mine rolls for itself; `mineTint` colours the rock by the zone you are in.
+export const mineZone = (m, x, z) => { const u = ((x - m.x0) * m.ax + (z - m.z0) * m.az) / m.total; return m.zt[Math.max(0, Math.min(m.n - 1, Math.floor(u * m.n)))] };
+const TINT = { timber: [1, .86, .68], cave: [.88, .88, .92], crystal: [.8, .88, 1.1], ice: [.62, .86, 1.25] };
+export function mineTint(f, x, z) { return TINT[mineZone(f.cave.mine, x, z)] }

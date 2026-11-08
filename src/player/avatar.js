@@ -1,3 +1,4 @@
+import { makeItemMesh, ITEM_KEYS, HELD_POSE } from '../world/items.js';
 // People-shaped rig: torso, head, arms/legs hinged at shoulders and hips. Emotes are just target joint angles.
 const P = (o) => ({ aL: [0, 0], aR: [0, 0], lL: 0, lR: 0, drop: 0, ...o });
 export const EMOTES = [
@@ -48,7 +49,7 @@ export class Avatar {
     this.tag.position.y = 2.15; this.tag.material = tm; this.tag.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
     this.pitch = 0; this.pos = new BABYLON.Vector3(); this.yaw = 0; this.phase = 0; this.t = 0; this.emote = 0; this.climb = false; this.fresh = true;
     this.reachTo = null; this.flags = 0; this.clasp = BABYLON.MeshBuilder.CreateSphere('clasp', { diameter: .2, segments: 6 }, scene); this.clasp.material = skin; this.clasp.setEnabled(false);
-    this.cur = P({}); this.cur = { aLx: 0, aLz: 0, aRx: 0, aRz: 0, lL: 0, lR: 0, drop: 0, lie: 0 }; this._v = new BABYLON.Vector3();
+    this.held = {}; this.heldKey = null; this.cur = P({}); this.cur = { aLx: 0, aLz: 0, aRx: 0, aRz: 0, lL: 0, lR: 0, drop: 0, lie: 0 }; this._v = new BABYLON.Vector3();
   }
   setPic(d) { if (!d) { this.picMat.emissiveTexture = null; this.picMat.emissiveColor = new BABYLON.Color3(.92, .92, .88); return } this.picMat.emissiveTexture = (() => { const t = new BABYLON.Texture(d, this.scene); t.anisotropicFilteringLevel = 8; return t })(); this.picMat.emissiveColor = BABYLON.Color3.White() }
   setName(n) {
@@ -56,7 +57,7 @@ export class Avatar {
     c.font = 'bold 34px sans-serif'; c.textAlign = 'center'; c.lineWidth = 6; c.strokeStyle = 'rgba(0,0,0,.7)'; c.fillStyle = '#fff';
     c.strokeText(n, 128, 44); c.fillText(n, 128, 44); this.tex.update();
   }
-  setState([x, y, z, yaw, emote, flags, pitch]) { this.pitch = pitch || 0; this.flags = flags | 0; this.climb = !!(flags & 1); this.tgt = new BABYLON.Vector3(x, y - 1.7, z); this.tyaw = yaw; this.emote = emote | 0; if (this.fresh) { this.pos.copyFrom(this.tgt); this.fresh = false } }
+  setState([x, y, z, yaw, emote, flags, pitch, held]) { this.pitch = pitch || 0; this.heldKey = held ? ITEM_KEYS[held - 1] || null : null; this.flags = flags | 0; this.climb = !!(flags & 1); this.tgt = new BABYLON.Vector3(x, y - 1.7, z); this.tyaw = yaw; this.emote = emote | 0; if (this.fresh) { this.pos.copyFrom(this.tgt); this.fresh = false } }
   update(dt) {
     if (!this.tgt) return; const k = Math.min(1, dt * 12), before = this.pos.clone(); this.t += dt;
     if (this.snap) this.pos.copyFrom(this.tgt); else this.pos.addInPlace(this.tgt.subtract(this.pos).scale(k));
@@ -72,10 +73,14 @@ export class Avatar {
     if (this.flags & 4 && !this.climb) g = { ...g, aL: [aim, -.1] };  // left click: left hand reaches toward where you look (same angle as the right)
     if (this.flags & 2 && !this.climb) g = { ...g, aR: [aim, .1] };   // right click: right hand reaches toward where you look
     if (bUp && !this.climb) g = { ...g, aL: [-2.0, -.12], aR: [-2.0, .12] }; // binoculars raised to the eyes
+    if ((this.flags & 16384) && !this.climb && !(this.flags & 16)) g = { ...g, aR: [-2.25 + Math.sin(this.t * 11) * .09, .12] }; // using a held item (eating, drinking): the hand comes up to the face
     const down = !!(this.flags & 16); if (down) g = P({ aL: [-.9 + Math.sin(this.t * 2.1) * .12, -1.3], aR: [-.4 + Math.sin(this.t * 1.7 + 1) * .12, 1.1], lL: .35, lR: -.5 }); // knocked down: limbs sprawled
     const swim = !!(this.flags & 2048) && !down, kick = swim && speed > .6; // swimming: a crawl while moving, treading water when still
     if (swim) g = kick ? P({ aL: [-2.5 + Math.sin(this.t * 5) * .95, -.12], aR: [-2.5 + Math.sin(this.t * 5 + Math.PI) * .95, .12], lL: Math.sin(this.t * 10) * .4, lR: -Math.sin(this.t * 10) * .4 }) : P({ aL: [-.7 + Math.sin(this.t * 3) * .4, -.55], aR: [-.7 + Math.sin(this.t * 3 + 2.1) * .4, .55], lL: Math.sin(this.t * 6) * .45, lR: -Math.sin(this.t * 6) * .45 });
-    this.frame.setEnabled(!!def?.picture && !this.climb && !down); this.torch.setEnabled(hasT && !down); this.beam.setEnabled(hasT && tOn && !this.self && !down); this.lens.material.emissiveColor.set(tOn ? 1 : .25, tOn ? .95 : .25, tOn ? .7 : .22); this.binos.setEnabled(hasB && !down && !(bUp && this.self)); this.lamp.setEnabled(hasL && !down); this.lampGlass.emissiveColor.set(lOn ? 1 : .3, lOn ? .78 : .25, lOn ? .35 : .15);
+    this.frame.setEnabled(!!def?.picture && !this.climb && !down && !this.self); /* (your own picture is drawn by main.js in your view) */ this.torch.setEnabled(hasT && !down); this.beam.setEnabled(hasT && tOn && !this.self && !down); this.lens.material.emissiveColor.set(tOn ? 1 : .25, tOn ? .95 : .25, tOn ? .7 : .22); this.binos.setEnabled(hasB && !down && !(bUp && this.self)); this.lamp.setEnabled(hasL && !down); this.lampGlass.emissiveColor.set(lOn ? 1 : .3, lOn ? .78 : .25, lOn ? .35 : .15);
+    { const own = ['flashlight', 'binoculars', 'lantern'].includes(this.heldKey), hk = this.heldKey && !own && !this.self && !down && !this.climb ? this.heldKey : null; // every other item is a real model in the hand (flashlight, binoculars and lantern have their own above)
+      if (hk && !this.held[hk]) { const r = makeItemMesh(this.scene, hk), hp = HELD_POSE[hk] || [0, 0, -.04, 1.3]; r.parent = this.armR; r.position.set(0, -.6 + hp[2], .04); r.rotation.set(hp[1], 0, hp[0]); r.scaling.setAll(hp[3]); this.held[hk] = r }
+      for (const k in this.held) this.held[k].setEnabled(k === hk) }
     const c = this.cur, m = Math.min(1, dt * 10), l = (a, b) => a + (b - a) * m;
     c.aLx = l(c.aLx, g.aL[0]); c.aLz = l(c.aLz, g.aL[1]); c.aRx = l(c.aRx, g.aR[0]); c.aRz = l(c.aRz, g.aR[1]);
     c.lL = l(c.lL, g.lL); c.lR = l(c.lR, g.lR); c.drop = l(c.drop, g.drop); c.lie += ((down ? 1 : 0) - c.lie) * Math.min(1, dt * (down ? 9 : 3));
@@ -99,5 +104,5 @@ export class Avatar {
     } else if (this.armR.rotationQuaternion) { this.armR.rotationQuaternion = null; this.armR.scaling.y = 1; this.clasp.setEnabled(false) }
   }
   hideHead() { this.head.setEnabled(false); this.tag.setEnabled(false); this.frame.position.set(0, 1.36, .78); this.frame.scaling.setAll(.55) } // your own view: no head, the picture is held at hand height (low in your view), not in front of your face
-  dispose() { this.root.getChildMeshes().forEach(m => m.dispose()); this.clasp.dispose(); this.root.dispose() }
+  dispose() { for (const k in this.held) this.held[k].getChildMeshes().forEach(m => m.dispose()); this.root.getChildMeshes().forEach(m => m.dispose()); this.clasp.dispose(); this.root.dispose() }
 }

@@ -1,9 +1,9 @@
-import { Terrain, BIOME_NAMES } from './world/terrain.js';
+import { Terrain, BIOME_NAMES, BIOME_COLD } from './world/terrain.js';
 import { buildHouse } from './world/house.js';
-import { GroundItems, ITEM_DEFS } from './world/items.js';
+import { GroundItems, ITEM_DEFS, ITEM_KEYS, HELD_POSE, makeItemMesh } from './world/items.js';
 import { Chunks } from './world/chunks.js';
 import { makeSky, SUN_DIR } from './world/sky.js';
-import { Controller } from './player/controller.js';
+import { Controller, RESERVE_CAP } from './player/controller.js';
 import { initMenu, playerName, getPic, patchWorld } from './menu.js';
 import { Net } from './net.js';
 import { Avatar, EMOTES } from './player/avatar.js';
@@ -12,6 +12,7 @@ import { Weather } from './world/weather.js';
 import { Daytime } from './world/daytime.js';
 import { makePrecip } from './world/precip.js';
 import { shelterTop } from './world/features.js';
+import { Fauna } from './world/fauna.js';
 import { makeAmbience } from './audio/ambience.js';
 
 const $ = (id) => document.getElementById(id), canvas = $('c'), q = new URLSearchParams(location.search), HORIZON = [.72, .82, .9];
@@ -20,14 +21,14 @@ const AFF = { hunger: '#e3b341', cold: '#5fb0ff', poison: '#8bd450', injury: '#e
 function launch(cfg, joined) {
   if (!joined && q.get('seed')) cfg.seed = q.get('seed'); if (!joined && q.get('length')) cfg.length = +q.get('length'); if (!joined && q.get('gen')) cfg.gen = +q.get('gen'); // ?gen=1 plays the original mountain // ?seed= &length= still work
   window.gameConfig = cfg; const myName = playerName(), opts = Object.assign({ fov: 75, sens: 1, vol: .5 }, JSON.parse(localStorage.getItem('mountain:opts') || '{}'));
-  const terrain = new Terrain(cfg.seed, cfg.length, { climb: cfg.climb, step: cfg.step, gen: cfg.gen || 1, sv: cfg.sv || 1, scn: cfg.scn || 0, sf: cfg.sf ?? 1, cv: cfg.cv || 0, tr: cfg.tr || 0 }), engine = new BABYLON.Engine(canvas, true), scene = new BABYLON.Scene(engine);
+  const terrain = new Terrain(cfg.seed, cfg.length, { climb: cfg.climb, step: cfg.step, gen: cfg.gen || 1, sv: cfg.sv || 1, scn: cfg.scn || 0, sf: cfg.sf ?? 1, cv: cfg.cv || 0, tr: cfg.tr || 0, v3: cfg.v3 || 0 }), engine = new BABYLON.Engine(canvas, true), scene = new BABYLON.Scene(engine);
   const sun = new BABYLON.Vector3(...SUN_DIR), hz = new BABYLON.Color3(...HORIZON);
   scene.clearColor = new BABYLON.Color4(...HORIZON, 1); scene.fogMode = BABYLON.Scene.FOGMODE_LINEAR; scene.fogColor = hz; // clear up close, fades into the horizon color near the edge
   const sunLight = new BABYLON.DirectionalLight('sun', sun.scale(-1), scene), hemi = new BABYLON.HemisphericLight('amb', new BABYLON.Vector3(0, 1, 0), scene); hemi.intensity = .55;
   const sky = makeSky(scene, sun, hz), view0 = cfg.radius * 64;
 
   const mat = (c) => { const m = new BABYLON.StandardMaterial('m', scene); m.diffuseColor = c; m.specularColor = BABYLON.Color3.Black(); return m };
-  const house = buildHouse(scene, terrain); // the starter cabin, with an interior
+  const house = buildHouse(scene, terrain, !!terrain.v3); // the starter cabin, with an interior
 
   const chunks = new Chunks(scene, terrain, cfg.radius, { sun, fogColor: hz, fogStart: view0 * .55, fogEnd: view0 * .97 });
   // Weather: fog distance and color, light, sky and ground shaders all follow one smoothed state (see weather.js). Fog thickness shrinks the view distance.
@@ -42,20 +43,22 @@ function launch(cfg, joined) {
   const daytime = new Daytime(cfg.seed), V3 = () => new BABYLON.Vector3(), vSun = V3(), vCol = V3(), vAmb = V3(), vSky = V3(), vMoon = V3(), vZen = V3(), vCloud = V3(); // reused every frame
   if (q.get('time')) daytime.setClock(+q.get('time'), gt); window.daytime = daytime; window.setTime = (h) => { daytime.setClock(+h, gt); return daytime.clock(gt) }; // console: setTime(22) jumps to 22:00 (local only); ?time=22 in the URL
   if (q.get('weather')) weather.force = q.get('weather'); window.weather = weather; window.setWeather = (n) => { weather.force = n && n !== 'auto' ? n : null; return weather.force || 'auto' }; // console: setWeather('storm' | 'rain' | 'snow' | 'fog' | 'cloudy' | 'clear' | 'auto')
+  let roofK = 0, roofT = 0; const upRay = new BABYLON.Ray(new BABYLON.Vector3(), new BABYLON.Vector3(0, 1, 0), 14), isRoof = (m) => !!m.metadata?.shelter; // a roof overhead (cabin, shed, tent) shelters you like rock does
   let uwK = 0; const uwEl = $('underwater');
   const weatherStep = (dt, p, now) => {
     const T = daytime.at(now); // time of day: sun, moon, sky colors, darkness
-    const alt = Math.max(0, Math.min(1, (p.y - 1.7) / terrain.peak)), w = weather.at(p.x, p.z, now, alt), a = Math.min(1, dt * .5), ss = (x0, x1, x) => { const t = Math.max(0, Math.min(1, (x - x0) / (x1 - x0))); return t * t * (3 - 2 * t) };
+    const alt = Math.max(0, Math.min(1, (p.y - 1.7) / terrain.peak)), cAlt = terrain.v3 ? Math.min(1, coldIdx * .85 + .15 * Math.min(1, (p.y - 1.7) / 3000)) : alt, w = weather.at(p.x, p.z, now, cAlt), a = Math.min(1, dt * .5), ss = (x0, x1, x) => { const t = Math.max(0, Math.min(1, (x - x0) / (x1 - x0))); return t * t * (3 - 2 * t) };
+    coldIdx += ((BIOME_COLD[biomeNow] || 0) + .12 * Math.min(1, (p.y - 1.7) / 2500) - coldIdx) * Math.min(1, dt * .4); // how cold the land here is: it comes from the biome and the weather, only a little from height
     for (const k of ['cover', 'fog', 'rain', 'snow', 'storm']) ws[k] += (w[k] - ws[k]) * a; ws.wind = ws.zone ? (() => { const m = Math.hypot(w.wind[0], w.wind[1]), k = 1 + 1.3 * ws.zone, dx = m > .01 ? w.wind[0] / m : 1, dz = m > .01 ? w.wind[1] / m : 0; return [w.wind[0] * k + dx * 5 * ws.zone, w.wind[1] * k + dz * 5 * ws.zone] })() : w.wind; // (a windy ridge strengthens it) eased, so walking out of a rain cell fades instead of snapping
     if (now - gAt > .5) { gnd = weather.ground(now); gAt = now } // how wet / snowy the mountain is from the recent past (same for everyone)
     ws.wet += (gnd.wet - ws.wet) * Math.min(1, dt * .3); ws.snowCover += (gnd.snow - ws.snowCover) * Math.min(1, dt * .3);
-    const under = terrain.gen >= 2 && shelterTop(terrain, p.x, p.z) > p.y; // rock overhead: out of the rain
+    const under = (terrain.gen >= 2 && shelterTop(terrain, p.x, p.z) > p.y) || roofK > .5; // rock overhead, or the roof of a cabin, shed or tent: out of rain and wind // rock overhead: out of the rain
     ws.shelter += ((under ? 1 : 0) - ws.shelter) * Math.min(1, dt * 3); precip.shelter = terrain.gen >= 2 && terrain.featuresNear(p.x, p.z).length ? shelterFn : null;
     const rainy = ws.rain + ws.snow * .5 > .05 && !under; const swim = player.swimming; ws.soak += ((rainy || swim ? 1 : 0) - ws.soak) * Math.min(1, dt * (swim ? .4 : rainy ? .1 : .03)); // swimming soaks you through (and so makes you cold) within a few seconds; // you get wet in rain and dry off under rock (nothing uses this yet: it's the hook for cold)
     // Cold: builds with altitude, night, being wet and wind; eases off in sun, under rock and lower down. It reserves part of your maximum energy (the blue segment of the bar), like PEAK.
-    const nightC = .12 * T.night * (.3 + .7 * Math.pow(alt, .6)); // night chills mostly up high; down on the meadow it's barely noticeable
-    const gm = Math.hypot(ws.wind[0], ws.wind[1]), exposed = under ? 0 : 1, coldT = 100 * Math.min(.55, Math.max(0, .22 * Math.pow(alt, 1.2) + nightC + .22 * ws.soak + .08 * Math.min(1, gm / 10) * exposed + .05 * ws.snow - (under ? .03 : .1 * T.day * (1 - ws.cover)) - (ws.warm || 0)));
-    ws.why = [[.22 * Math.pow(alt, 1.2), 'altitude'], [nightC, 'night'], [.22 * ws.soak, 'wet'], [.08 * Math.min(1, gm / 10) * exposed, 'wind'], [.05 * ws.snow, 'snow']].filter(a => a[0] > .02).sort((a, b) => b[0] - a[0]).map(a => a[1]).join(', ');
+    const nightC = .12 * T.night * (.3 + .7 * Math.pow(cAlt, .6)); // night chills mostly up high; down on the meadow it's barely noticeable
+    const gm = Math.hypot(ws.wind[0], ws.wind[1]), exposed = under ? 0 : 1, coldT = 100 * Math.min(.55, Math.max(0, .22 * Math.pow(cAlt, 1.2) + nightC + .22 * ws.soak + .08 * Math.min(1, gm / 10) * exposed + .05 * ws.snow - (under ? .03 : .1 * T.day * (1 - ws.cover)) - (ws.warm || 0)));
+    ws.why = [[.22 * Math.pow(cAlt, 1.2), terrain.v3 ? 'cold land' : 'altitude'], [nightC, 'night'], [.22 * ws.soak, 'wet'], [.08 * Math.min(1, gm / 10) * exposed, 'wind'], [.05 * ws.snow, 'snow']].filter(a => a[0] > .02).sort((a, b) => b[0] - a[0]).map(a => a[1]).join(', ');
     ws.cold += Math.max(-.8 * dt, Math.min(.6 * dt, coldT - ws.cold)); player.setAffliction('cold', ws.cold > .5 ? Math.round(ws.cold * 2) / 2 : 0);
     // Wind: a mild steady push on exposed ground (storms only; stronger higher up). player.update ignores it while you're holding on to something.
     const push = under ? 0 : Math.max(0, gm - 4) * .35 * (.4 + .6 * alt), tx = gm > 0 ? w.wind[0] / gm * push : 0, tz = gm > 0 ? w.wind[1] / gm * push : 0, wa = Math.min(1, dt * 2); ws.pv[0] += (tx - ws.pv[0]) * wa; ws.pv[1] += (tz - ws.pv[1]) * wa; player.windV = ws.pv;
@@ -77,9 +80,9 @@ function launch(cfg, joined) {
     const k = sky.material; k.setColor3('horizon', hz); k.setFloat('cover', ws.cover); k.setFloat('dark', dark); k.setFloat('flash', fl); k.setVector3('sun', vSky.set(...T.sun)); k.setVector3('moon', vMoon.set(...T.moon)); k.setVector3('zenith', vZen.set(...T.zenith)); k.setFloat('night', T.night); k.setFloat('rainbow', ws.rainbow || 0); k.setVector3('sunCol', vCol.set(...T.sunCol)); k.setVector3('cloudCol', vCloud.set(...T.cloud));
     for (const pm of chunks.props.mats) pm.diffuseColor.set(1 - .22 * ws.wet, 1 - .22 * ws.wet, 1 - .22 * ws.wet); // wet trees and rocks look darker
     if (fl > .5 && lastFl < .2) setTimeout(() => amb.thunder(), 400 + Math.random() * 2500); lastFl = fl; amb.update(ws);
-    precip.update(p, ws, dt);
+    if (roofK > .5) precip.update(p, Object.assign(wsDry, ws, { rain: 0, snow: 0 }), dt); else precip.update(p, ws, dt);
   };
-  const avatars = new Map(), hud = $('hud');
+  const avatars = new Map(), hud = $('hud'), wsDry = {}, fauna = new Fauna(scene, terrain); // wildlife (world/fauna.js)
   const addAv = (id) => { if (!avatars.has(id)) avatars.set(id, new Avatar(scene, id)) };
   // When late joiners spawn at the base, the gear on the counter scales with the group: whenever someone joins, the host tops the counter up to one flashlight and one pair of binoculars per player.
   const stockCabin = () => { if (!net?.isHost || cfg.joinSpawn === 'host') return; /* late joiners who spawn next to the host are far from the cabin: no extra gear for them */ const c = house.counter, n = avatars.size + 1;
@@ -119,6 +122,18 @@ function launch(cfg, joined) {
   addEventListener('keydown', (e) => { if (document.pointerLockElement !== canvas || player.frozen || e.repeat) return;
     if (['Digit1', 'Digit2', 'Digit3', 'Digit4'].includes(e.code)) equip(+e.code.slice(5) - 1) });
   addEventListener('wheel', (e) => { if (document.pointerLockElement !== canvas || player.frozen) return; if (zoomOn) { zoomT = Math.max(2, Math.min(12, zoomT * (e.deltaY < 0 ? 1.2 : 1 / 1.2))); try { localStorage.setItem('mountain.zoom', zoomT.toFixed(2)) } catch {} } else { const o = [-1, 0, 1, 2, 3], n = o[(o.indexOf(sel) + (e.deltaY > 0 ? 1 : 4)) % 5]; sel = n >= 0 && !inv[n] ? -1 : n; torchOn = false; hbSig = '' } }); // wheel: zoom while using binoculars, otherwise switch item
+  // What you hold is a real model in your own view too (bottom right, bobbing as you walk, rising to your face while you eat or drink). It is drawn in its own layer so a wall never swallows it.
+  const vm = new BABYLON.TransformNode('vm', scene); vm.parent = player.cam; scene.setRenderingAutoClearDepthStencil(1, true, true, true);
+  const vmPic = BABYLON.MeshBuilder.CreatePlane('vmpic', { size: .34 }, scene); vmPic.parent = player.cam; const vmPm = new BABYLON.StandardMaterial('vmpicm', scene); vmPm.disableLighting = true; vmPm.specularColor = BABYLON.Color3.Black(); vmPm.backFaceCulling = false; vmPm.fogEnabled = false; vmPic.material = me.picMat; me.picMat.backFaceCulling = false; let vmTex = undefined; vmPic.isPickable = false; vmPic.setEnabled(false); vmPic.position.set(0, -.17, .6); vmPic.rotation.x = .2; // the Picture emote: you see your own picture too, held low in front of you
+  let vmType = null, vmNode = null, vmK = 1, vmPh = 0; const LONG = ['flashlight', 'jerky', 'snack', 'piton', 'handWarmer', 'binoculars'];
+  const syncVm = (dt) => {
+    const hk = held(); if (hk !== vmType) { if (vmNode) { vmNode.getChildMeshes().forEach(m => m.dispose()); vmNode.dispose(); vmNode = null } vmType = hk; vmK = 1;
+      if (hk) { vmNode = makeItemMesh(scene, hk); vmNode.parent = vm; vmNode.rotation.set(.3, LONG.includes(hk) ? -1.3 : -.5, 0); vmNode.scaling.setAll(hk === 'binoculars' || hk === 'lantern' ? 1.4 : 1.7); vmNode.getChildMeshes().forEach(m => { m.renderingGroupId = 1; m.isPickable = false; m.material && (m.material.fogEnabled = false) }) } }
+    const pic = !!EMOTES[emote - 1]?.picture && !player.climbing && !player.down; vmPic.setEnabled(pic); if (pic && vmTex !== me.picMat.emissiveTexture) { vmTex = me.picMat.emissiveTexture; vmPm.emissiveTexture = vmTex; vmPm.emissiveColor = vmTex ? BABYLON.Color3.White() : new BABYLON.Color3(.92, .92, .88) }
+    if (vmNode) vmNode.setEnabled(!player.down && zoomC < 1.3 && !(player.climbing && !ITEMS[hk]?.climbOk));
+    vmK += (0 - vmK) * Math.min(1, dt * 7); const sp = Math.hypot(player.vx || 0, player.vz || 0), mv = Math.min(1, sp / 4); vmPh += dt * Math.min(sp, 9) * 1.7; const u = useProg;
+    vm.position.set(.34 - u * .24 + Math.cos(vmPh * .5) * .008 * mv, -.3 + u * .16 - Math.abs(Math.sin(vmPh)) * .012 * mv - vmK * .5, .64 - u * .18); vm.rotation.x = -u * .5 + Math.sin(performance.now() / 700) * .01;
+  };
   bar.style.display = 'flex'; hotbar();
   // Things on the ground: E picks up, Q drops (tap) or throws (hold, release: the meter shows how hard). The host decides who gets an item, so two friends can't both take it.
   const ground = new GroundItems(scene, terrain, chunks, house.colliders, (x, z) => chunks.boxesNear(x, z)), rid = () => Math.random().toString(36).slice(2, 9), myId = () => net?.id || 'h', me3 = () => player.cam.position;
@@ -127,7 +142,7 @@ function launch(cfg, joined) {
   // Spawn points along the trail (huts, sheds, caches, berry bushes) turn into ground items the first time you come near; used remembers which already did, or were taken
   const used = new Set(joined ? joined.used || [] : cfg.used || []); let warmFire = 0, cpNear = null, cp = cfg.cp || null; if (!cp && spawn) cp = { id: 'start', x: spawn.x, z: spawn.z, yaw: spawn.yaw };
   const spawnNear = () => { for (const st of terrain.sitesNear(player.cam.position.x, player.cam.position.z, 120)) for (const sp of st.spawns) if (!used.has(sp.id)) { used.add(sp.id); ground.add({ id: sp.id, type: sp.type, x: sp.x, y: sp.y, z: sp.z, rest: true }) } };
-  const setCp = (st) => { if (cp?.id !== st.id) player.reserve = Math.min(60, player.reserve + 25); cp = { id: st.id, x: st.cp.x, z: st.cp.z, yaw: player.cam.rotation.y }; toast('Checkpoint set. Esc, then "Return to last checkpoint" brings you back here') };
+  const setCp = (st) => { if (cp?.id !== st.id) player.reserve = Math.min(RESERVE_CAP, player.reserve + 25); cp = { id: st.id, x: st.cp.x, z: st.cp.z, yaw: player.cam.rotation.y }; toast('Checkpoint set. Esc, then "Return to last checkpoint" brings you back here') };
   const toCheckpoint = () => { const c = cp || { x: house.spawn.x, z: house.spawn.z, yaw: house.spawn.yaw }; player.teleport(c.x, c.z, c.yaw); torchOn = zoomOn = false; hbSig = '' };
   let qDown = 0, near = null, toastMsg = '', toastT = 0; const prompt = $('prompt'), thr = $('throw'), thrFill = $('throwFill');
   const toast = (m) => { toastMsg = m; toastT = performance.now() + 2000 };
@@ -138,9 +153,9 @@ function launch(cfg, joined) {
   const give = (type) => { const i = inv.indexOf(null); if (i < 0) { launchItem(type, 0); toast('Hands full'); return } inv[i] = type; sel = i; torchOn = zoomOn = false; hbSig = '' };
   const throwHeld = (h) => { const type = held(); if (!type) return; inv[sel] = null; sel = -1; torchOn = zoomOn = false; hbSig = ''; launchItem(type, h < .25 ? 0 : Math.min(1, (h - .25) / 1.1)) };
   // Left click uses the held item. 'click' items act on the click, 'hold' items need the button held for a moment (a way of confirming). Hunger, buffs and reserve energy live here too.
-  let useT = 0, lcPrev = false, armed = false, hungerV = cfg.hv ?? .08, chalkT = 0, warmT = 0, springK = 0, zoneK = 0; const HUNGER = cfg.hunger ?? 1, useBar = $('use'), useFill = $('useFill'), rsv = $('ereserve');
+  let useT = 0, lcPrev = false, armed = false, hungerV = cfg.hv ?? .08, hungerT = 0, hungerPulse = 0, chalkT = 0, warmT = 0, springK = 0, zoneK = 0; const HUNGER = cfg.hunger ?? 1, useBar = $('use'), useFill = $('useFill'), rsv = $('ereserve');
   const finishUse = (it) => { const d = ITEMS[it]; let msg = d.name;
-    if (d.eat) { const e = d.eat; if (e.energy) player.stamina = Math.min(player.cap, player.stamina + e.energy); if (e.hunger) hungerV = Math.max(0, hungerV - e.hunger / 100); if (e.reserve) player.reserve = Math.min(60, player.reserve + e.reserve); msg = `${d.name}: ${[e.energy && '+' + e.energy + ' energy', e.hunger && 'less hungry', e.reserve && '+' + e.reserve + ' reserve'].filter(Boolean).join(', ')}` }
+    if (d.eat) { const e = d.eat; if (e.energy) player.stamina = Math.min(player.cap, player.stamina + e.energy); if (e.hunger) hungerV = Math.max(0, hungerV - e.hunger / 100); if (e.reserve) player.reserve = Math.min(RESERVE_CAP, player.reserve + e.reserve); if (e.heal) injury = Math.max(0, injury - e.heal); if (e.warm) warmT = Math.max(warmT, e.warm); msg = `${d.name}: ${[e.energy && '+' + e.energy + ' energy', e.hunger && 'less hungry', e.reserve && '+' + e.reserve + ' reserve', e.heal && 'injuries treated', e.warm && 'warmer'].filter(Boolean).join(', ')}` }
     else if (d.buff === 'chalk') { chalkT = 120; msg = 'Chalk: hands dry for 2 minutes' } else if (d.buff === 'warm') { warmT = 90; msg = 'Hand warmer: warmer for 90 seconds' }
     else if (it === 'piton') { const yw = player.cam.rotation.y, pp = me3(), pi = { id: 'i' + rid(), type: 'piton', x: pp.x + Math.sin(yw) * .45, y: pp.y - .6, z: pp.z + Math.cos(yw) * .45, rest: true }; ground.add(pi); net?.sendItem({ op: 'drop', item: pi }); msg = 'Piton in: you can rest here' }
     inv[sel] = null; sel = -1; torchOn = zoomOn = false; hbSig = ''; toast(msg) };
@@ -148,11 +163,12 @@ function launch(cfg, joined) {
     if (d && lc && !player.down) { if (d.use === 'click') { if (!lcPrev) { if (it === 'binoculars') zoomOn = !zoomOn; else torchOn = !torchOn; hbSig = '' } }
       else if (it === 'piton' ? player.climbing : armed) { useT += dt; prog = useT / d.hold; if (useT >= d.hold) { useT = 0; prog = 0; finishUse(it) } } else useT = 0 }
     else useT = 0;
-    useBar.style.display = prog > 0 ? 'block' : 'none'; useFill.style.width = Math.min(1, prog) * 100 + '%'; lcPrev = lc };
+    useProg = prog; useBar.style.display = prog > 0 ? 'block' : 'none'; useFill.style.width = Math.min(1, prog) * 100 + '%'; lcPrev = lc };
   const live = () => document.pointerLockElement === canvas && !player.frozen;
   addEventListener('keydown', (e) => { if (!live() || e.repeat || player.down) return;
     if (e.code === 'KeyQ' && held()) qDown = performance.now();
-    if (e.code === 'KeyE' && !near && cpNear) setCp(cpNear);
+    if (e.code === 'KeyE' && !near && restNear) { if (cpNear) setCp(cpNear); if (DEATH === 'revive' && othersDead().length) { net?.sendEvt({ k: 'revive', x: restNear.cp.x, z: restNear.cp.z, yaw: player.cam.rotation.y }); toast('You rest here: fallen friends come back to this checkpoint') } }
+    if (e.code === 'KeyZ' && restNear && !sleeping && !dead && !player.swimming) startSleep();
     if (e.code === 'KeyE' && near) { if (!inv.includes(null)) return toast('Hands full: drop something first (Q)');
       if (net && !net.isHost) net.sendItem({ op: 'take', id: near.id, type: near.type }); else { ground.remove(near.id); used.add(near.id); give(near.type); net?.sendItem({ op: 'took', id: near.id, type: near.type, by: 'h' }) } } });
   addEventListener('keyup', (e) => { if (e.code === 'KeyQ' && qDown) { const h = (performance.now() - qDown) / 1000; qDown = 0; if (live()) throwHeld(h) } });
@@ -168,7 +184,45 @@ function launch(cfg, joined) {
   applyGfx(); $('gfx').value = opts.gfx; $('gfx').onchange = () => { opts.gfx = +$('gfx').value; saveOpts(); applyGfx() };
 
   if (!joined && cfg.start) player.cam.position.set(cfg.start.x, cfg.start.y + 3, cfg.start.z); // continue a saved world
-  setInterval(() => { if (joined || !cfg.worldId) return; const p = player.cam.position; patchWorld(cfg.worldId, { pos: { x: p.x, y: p.y, z: p.z }, played: Date.now(), wt: gt, hv: hungerV, inv: [...inv], items: ground.snapshot(), used: [...used], cp }) }, 3000);
+  setInterval(() => { if (joined || !cfg.worldId) return; const p = player.cam.position; patchWorld(cfg.worldId, { pos: { x: p.x, y: p.y, z: p.z }, played: Date.now(), wt: gt, hv: hungerV, inj: injury, sm: summitDone, inv: [...inv], items: ground.snapshot(), used: [...used], cp }) }, 3000);
+
+  // Survival: injuries, death and revival, sleeping at rest spots. Energy is your health: when cold, hunger and injury have used all of it, you die.
+  const DEATH = cfg.death || 'revive', HUNGER_EVERY = 90, HUNGER_STEP = .06, SLEEP_RATE = 30; /* SLEEP_RATE: game seconds per real second while everyone sleeps (an hour is 60 game seconds, so 12 h is about 24 s) */
+  let injury = cfg.inj || 0, dead = false, deadT = 0, deadWhy = '', sleeping = false, sleepH = 0, sleepT = 0, restNear = null, ffNow = 1, useProg = 0, coldIdx = 0, biomeNow = 0, summitDone = !!cfg.sm;
+  const deadEl = $('dead'), deadMsg = $('deadMsg'), deadBtn = $('deadBtn'), sleepEl = $('sleepov'), sleepMsg = $('sleepMsg'), sumEl = $('summit');
+  const othersAlive = () => [...avatars.values()].some(a => !(a.flags & 8192)), othersDead = () => [...avatars.values()].filter(a => a.flags & 8192), startPt = () => ({ x: house.spawn.x, z: house.spawn.z, yaw: house.spawn.yaw });
+  player.onHurt = (a) => { if (dead) return; injury = Math.min(100, injury + a); toast(`Ouch! Injured: ${Math.round(injury)}% of your energy bar`) };
+  const die = (why) => { if (dead) return; dead = true; deadT = 0; deadWhy = why; sleeping = false; player.sleeping = false; player.dead = true; player.limp = true; player.ragT = 0; const p = me3(); // your things stay where you fell
+    for (let i = 0; i < inv.length; i++) if (inv[i]) { const it = { id: 'i' + rid(), type: inv[i], x: p.x + (Math.random() - .5) * 1.4, y: p.y - 1.2, z: p.z + (Math.random() - .5) * 1.4, vx: (Math.random() - .5) * 2, vy: 2, vz: (Math.random() - .5) * 2 }; ground.add(it); net?.sendItem({ op: 'drop', item: it }); inv[i] = null }
+    sel = -1; torchOn = zoomOn = false; hbSig = ''; net?.sendEvt({ k: 'died', name: myName, why }); deadEl.style.display = 'flex'; deadBtn.style.display = 'none'; sleepEl.style.display = 'none' };
+  const revive = (c) => { dead = false; player.dead = false; player.limp = false; player.teleport(c.x, c.z, c.yaw); player.stamina = Math.min(player.cap, 60); player.exhausted = false; player.reserve = 0; injury = 0; hungerV = Math.min(hungerV, .3); hungerT = 0; ws.cold = 0; deadEl.style.display = 'none'; toast('You are back on your feet') };
+  const respawnNow = () => { if (DEATH === 'restart') { const s = startPt(); cp = { id: 'start', ...s }; revive(s) } else revive(cp || startPt()) };
+  deadBtn.onclick = () => { respawnNow(); resume() };
+  const startSleep = () => { sleeping = true; player.sleeping = true; sleepH = 0; sleepT = 0; sel = -1; torchOn = zoomOn = false; hbSig = ''; if (cpNear) setCp(cpNear); sleepEl.style.display = 'flex'; sleepEl.style.opacity = 0 };
+  const wake = () => { if (!sleeping) return; sleeping = false; player.sleeping = false; sleepEl.style.display = 'none'; toast(`You slept ${sleepH.toFixed(1)} h${sleepH >= 11.9 ? ' (a full night)' : ''}. Reserve energy: ${Math.round(player.reserve)}`) };
+  addEventListener('keydown', (e) => { if (sleeping && sleepT > .7 && !e.repeat && ['KeyE', 'Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(e.code)) wake() }); addEventListener('mousedown', () => { if (sleeping && sleepT > .7 && document.pointerLockElement === canvas) wake() });
+  handlers.evt = (d) => { if (d.k === 'revive' && dead && DEATH === 'revive') revive({ x: d.x, z: d.z, yaw: d.yaw }); else if (d.k === 'died') toast(`${d.name} ${d.why}`); else if (d.k === 'summit') toast(`${d.name} reached the summit!`) };
+  const survival = (dt, gdt) => {
+    if (!dead) {
+      player.setAffliction('injury', Math.round(injury * 2) / 2);
+      if (hungerV >= .999 && HUNGER > 0) injury = Math.min(100, injury + .9 * gdt); // starving hurts
+      if (!sleeping && warmFire > .3 && injury > 0) injury = Math.max(0, injury - .25 * gdt); // resting by a fire slowly mends you
+      if (player.lost >= 99) { const w = Object.entries(player.aff).sort((a, b) => b[1] - a[1])[0]?.[0]; die(w === 'cold' ? 'froze to death' : w === 'hunger' ? 'starved' : 'were too badly hurt') }
+    } else {
+      deadT += dt; deadMsg.textContent = `You ${deadWhy}.`; const sub = $('deadSub'), alive = othersAlive();
+      if (DEATH === 'restart') { sub.textContent = 'Starting over at the cabin…'; if (deadT > 4) respawnNow() }
+      else if (!avatars.size || !alive) { sub.textContent = 'Back to your last checkpoint…'; if (deadT > 4) respawnNow() }
+      else { sub.textContent = 'A friend who rests at a checkpoint brings you back there.'; if (deadT > 40) deadBtn.style.display = 'inline-block' }
+    }
+    if (sleeping) {
+      sleepT += dt; const all = [...avatars.values()].every(a => (a.flags & 4096) || (a.flags & 8192)); ffNow = all ? SLEEP_RATE : 1;
+      const dG = Math.min(dt, .25) * ffNow, dH = dG / 60; sleepH += dH; player.reserve = Math.min(RESERVE_CAP, player.reserve + RESERVE_CAP / 12 * dH); injury = Math.max(0, injury - 4 * dH); player.stamina = Math.min(player.cap, player.stamina + 40 * dt); hungerT += dG * .25 * HUNGER;
+      sleepEl.style.opacity = Math.min(.88, sleepT * .8); sleepMsg.textContent = `Sleeping… ${sleepH.toFixed(1)} h of 12 · ${all ? 'time is passing' : 'waiting for your friends to sleep too (time passes normally)'} · E or any move key to wake up`;
+      if (sleepH >= 12 || dead || player.swimming) wake();
+    } else ffNow = 1;
+  };
+  const showSummit = () => { summitDone = true; player.reserve = RESERVE_CAP; injury = 0; const secs = Math.round(gt), hh = Math.floor(secs / 3600), mm = Math.floor(secs % 3600 / 60); $('sumTxt').textContent = `${Math.round(terrain.summit.h).toLocaleString()} m · ${hh ? hh + ' h ' : ''}${mm} min of game time`; sumEl.style.display = 'flex'; setTimeout(() => sumEl.style.display = 'none', 12000); net?.sendEvt({ k: 'summit', name: myName }) };
+  sumEl.onclick = () => sumEl.style.display = 'none';
 
   // Pause, settings, and mouse lock. Browsers refuse a re-lock for about a second after Esc, so Resume simply keeps retrying until it's allowed.
   let paused = true, retry = 0; const pause = $('pause'), rb = $('resume');
@@ -180,7 +234,10 @@ function launch(cfg, joined) {
     if (document.pointerLockElement === canvas) { paused = false; pause.style.display = 'none'; clearInterval(retry); rb.textContent = 'Resume' }
     else { paused = true; player.frozen = false; pause.style.display = 'flex' }
   });
-  addEventListener('keydown', (e) => { if (paused && pause.style.display === 'flex' && ['Escape', 'Enter', 'Space'].includes(e.code) && e.target.type !== 'range') { e.preventDefault(); resume() } });
+  addEventListener('keydown', (e) => { if (!(paused && pause.style.display === 'flex') || e.target.type === 'range' || e.target.tagName === 'SELECT') return;
+    if (e.code === 'Enter' || e.code === 'Space') { e.preventDefault(); resume() } /* a key press or click counts as a user gesture, so the browser lets us lock the mouse again */
+    else if (e.code === 'Escape') { const h = $('escHint'); h.style.opacity = 1; clearTimeout(h._t); h._t = setTimeout(() => h.style.opacity = .55, 2500) } /* Esc can never re-lock the mouse (browsers don't treat it as a gesture): say so instead of failing quietly */ });
+  pause.addEventListener('mousedown', (e) => { if (e.target === pause) resume() }); /* clicking anywhere outside the card resumes */
   const slider = (id, label, get, set, fmt = (v) => v) => { const el = $(id); el.value = get(); $(label).textContent = fmt(get()); el.oninput = () => { set(+el.value); $(label).textContent = fmt(+el.value) } };
   const saveOpts = () => localStorage.setItem('mountain:opts', JSON.stringify({ fov: opts.fov, sens: opts.sens, vol: opts.vol, gfx: opts.gfx }));
   slider('fov', 'fovV', () => opts.fov, (v) => { opts.fov = v; saveOpts() });
@@ -204,16 +261,18 @@ function launch(cfg, joined) {
   const energy = () => { // energy bar: fill = current, striped colored segments = capacity lost to afflictions
     const sig = JSON.stringify(player.aff);
     if (sig !== affSig) { affSig = sig; let right = 0, html = ''; for (const [k, v] of Object.entries(player.aff)) { html += `<span title="${k}" style="right:${right}%;width:${v}%;background-color:${AFF[k] || '#999'}"></span>`; right += v } $('eaff').innerHTML = html }
-    $('efill').style.width = player.stamina + '%'; rsv.style.display = player.reserve > .5 ? 'block' : 'none'; rsv.firstElementChild.style.width = Math.min(100, player.reserve / 60 * 100) + '%'; $('energy').classList.toggle('low', player.exhausted || player.stamina < 25); $('elabel').textContent = player.exhausted ? 'Exhausted' : 'Energy'; $('ewhy').textContent = [player.aff.cold && `Cold: ${Math.round(player.aff.cold)}% lost (${ws.why || 'easing off'})`, player.aff.hunger > 3 && `${hungerV > .75 ? 'Starving' : hungerV > .45 ? 'Hungry' : 'A bit hungry'}: ${Math.round(player.aff.hunger)}% lost`, chalkT > 0 && `Chalk ${Math.ceil(chalkT)}s`, warmT > 0 && `Warm ${Math.ceil(warmT)}s`].filter(Boolean).join(' \u00b7 ');
+    $('efill').style.width = player.stamina + '%'; rsv.style.display = player.reserve > .5 ? 'block' : 'none'; rsv.firstElementChild.style.width = Math.min(100, player.reserve / RESERVE_CAP * 100) + '%'; $('energy').classList.toggle('exh', player.exhausted); $('elabel').textContent = player.exhausted ? 'Exhausted' : 'Energy'; $('ewhy').textContent = [player.aff.cold && `Cold: ${Math.round(player.aff.cold)}% lost (${ws.why || 'easing off'})`, player.aff.hunger > 3 && `${hungerV > .75 ? 'Starving' : hungerV > .45 ? 'Hungry' : 'A bit hungry'}: ${Math.round(player.aff.hunger)}% lost`, chalkT > 0 && `Chalk ${Math.ceil(chalkT)}s`, warmT > 0 && `Warm ${Math.ceil(warmT)}s`].filter(Boolean).join(' \u00b7 ');
   };
   scene.onBeforeRenderObservable.add(() => { const o = player.viewOff, c = player.cam.position; c.x += o[0]; c.y += o[1] - player.drop; c.z += o[2]; player._o = o }); scene.onAfterRenderObservable.add(() => { const o = player._o, c = player.cam.position; c.x -= o[0]; c.y -= o[1] - player.drop; c.z -= o[2] }); // the ragdoll view drop applies to rendering only
   engine.runRenderLoop(() => {
     const dt = engine.getDeltaTime() / 1000, p = player.cam.position, yaw = player.cam.rotation.y;
-    if (!(paused && avatars.size === 0)) gt += Math.min(dt, .25); if (!joined) cfg.wt = gt; if (net?.isHost && performance.now() - lastSync > 5000) { lastSync = performance.now(); net.sendTime(gt) } // time stands still while you're paused alone; with friends in the room it keeps going
+    if (!(paused && avatars.size === 0)) gt += Math.min(dt, .25) * ffNow; if (!joined) cfg.wt = gt; if (net?.isHost && performance.now() - lastSync > 5000) { lastSync = performance.now(); net.sendTime(gt) } // time stands still while you're paused alone; with friends in the room it keeps going
     { const hd = held(); player.noGrab = !!(hd && !ITEMS[hd].climbOk); player.chalk = chalkT; let pit = false; if (player.climbing) for (const o of ground.map.values()) if (o.type === 'piton' && Math.hypot(o.x - p.x, o.z - p.z) < 1.6 && Math.abs(o.y - (p.y - .7)) < 2) { pit = true; break } player.pitoned = pit }
     if (!paused) { player.update(dt); handleUse(dt, player.grab && !player.frozen) } else useBar.style.display = 'none';
-    chunks.update(p.x, p.z, p.y); sky.material.setFloat('time', performance.now() / 1000); const gdt = paused && avatars.size === 0 ? 0 : Math.min(dt, .25); // game seconds that passed
-    hungerV = Math.min(1, hungerV + (.00025 + (player.climbing ? .0004 : 0)) * HUNGER * gdt); player.setAffliction('hunger', Math.round(Math.pow(hungerV, 1.3) * 80) / 2); // hungry: up to 40% of your energy bar is gone
+    chunks.update(p.x, p.z, p.y); fauna.update(p.x, p.z, gt, Math.min(dt, .1), { day: daytime.at(gt).day, calm: 1 - Math.min(1, ws.rain * 1.5 + ws.storm) }); sky.material.setFloat('time', performance.now() / 1000); const gdt = paused && avatars.size === 0 ? 0 : Math.min(dt, .25); // game seconds that passed
+    if (HUNGER > 0 && !dead && !sleeping) { hungerT += gdt * HUNGER * (1 + (player.climbing ? 1.2 : 0)); if (hungerT >= HUNGER_EVERY) { hungerT -= HUNGER_EVERY; hungerV = Math.min(1, hungerV + HUNGER_STEP); hungerPulse = 1.6; toast(hungerV > .85 ? 'You are starving! Eat something' : hungerV > .5 ? 'Your stomach growls: you need food' : 'You are getting hungry') } } /* hunger comes in steps, like PEAK: every so often another chunk of your bar goes */
+    hungerPulse = Math.max(0, hungerPulse - gdt); player.setAffliction('hunger', Math.round(hungerV * 60 * 2) / 2); // hungry: up to 60% of your energy bar is gone; at the very bottom you start to starve
+    survival(dt, gdt);
     chalkT = Math.max(0, chalkT - gdt); warmT = Math.max(0, warmT - gdt); if (springK > 0) player.reserve = Math.min(40, Math.max(player.reserve, 0) + 3 * springK * gdt); ws.zone = zoneK;
     ws.warm = Math.min(.2, warmFire * .2) + (torchOn && held() === 'lantern' ? .05 : 0) + (warmT > 0 ? .1 : 0) + .3 * springK; weatherStep(dt, p, gt); if (chalkT > 0) player.wetK = 0; player.restK *= 1 + .8 * springK; // a fire or a lit lantern keeps you warmer
     if (zoomOn && (player.reach || player.climbing || player.down)) { zoomOn = false; hbSig = '' } if (torchOn && player.down) { torchOn = false; hbSig = '' } // using binoculars needs your hands free
@@ -221,12 +280,14 @@ function launch(cfg, joined) {
     $('binos').style.display = zoomC > 1.4 ? 'block' : 'none'; const zv = $('zoomv'); zv.style.display = zoomOn ? 'block' : 'none'; if (zoomOn) zv.textContent = `\u00d7${zoomT.toFixed(1)} · scroll to zoom`;
     torchK += ((torchOn ? 1 : 0) - torchK) * Math.min(1, dt * 12); { const cp = Math.cos(player.pitch); tDir.set(Math.sin(yaw) * cp, -Math.sin(player.pitch), Math.cos(yaw) * cp); tPos.set(p.x + Math.cos(yaw) * .25, p.y - .35, p.z - Math.sin(yaw) * .25);
       spot.position.copyFrom(tPos); spot.direction.copyFrom(tDir); const lan = held() === 'lantern'; spot.angle = lan ? 2.4 : .75; spot.range = lan ? 22 : 60; spot.intensity = torchK * (lan ? 1.1 : 2.2); chunks.mat.setVector4('torch', lan ? new BABYLON.Vector4(torchK * .55, -.25, .3, 0) : new BABYLON.Vector4(torchK, .86, .94, 0)); chunks.mat.setVector3('torchPos', tPos); chunks.mat.setVector3('torchDir', tDir) }
-    if (frame % 30 === 1) spawnNear(); if (frame % 10 === 2) { warmFire = 0; cpNear = null; let sp = 0, zn = 0; for (const st of terrain.sitesNear(p.x, p.z, 60)) { if (st.type === 'windRidge') zn = Math.max(zn, 1 - Math.min(1, Math.max(0, (Math.hypot(p.x - st.x, p.z - st.z) - 15) / 30))); if (st.spring && Math.hypot(p.x - st.spring.x, p.z - st.spring.z) < st.spring.r) sp = 1 } springK = sp; zoneK = zn; for (const st of terrain.sitesNear(p.x, p.z, 12)) { if (st.fire) { const dd = Math.hypot(p.x - st.fire.x, p.z - st.fire.z); if (dd < st.fire.r) warmFire = Math.max(warmFire, 1 - dd / st.fire.r) } if (st.cp && cp?.id !== st.id && Math.hypot(p.x - st.cp.x, p.z - st.cp.z) < 2.8 && Math.abs(p.y - 1.7 - st.h) < 3) cpNear = st } }
+    if (frame % 6 === 3) { upRay.origin.copyFrom(p); roofT = scene.pickWithRay(upRay, isRoof)?.hit ? 1 : 0 } roofK += (roofT - roofK) * Math.min(1, dt * 4);
+    if (frame % 30 === 1) spawnNear(); if (frame % 10 === 2) { warmFire = 0; cpNear = null; restNear = null; let sp = 0, zn = 0; for (const st of terrain.sitesNear(p.x, p.z, 60)) { if (st.type === 'windRidge') zn = Math.max(zn, 1 - Math.min(1, Math.max(0, (Math.hypot(p.x - st.x, p.z - st.z) - 15) / 30))); if (st.spring && Math.hypot(p.x - st.spring.x, p.z - st.spring.z) < st.spring.r) sp = 1 } springK = sp; zoneK = zn; for (const st of terrain.sitesNear(p.x, p.z, 12)) { if (st.fire) { const dd = Math.hypot(p.x - st.fire.x, p.z - st.fire.z); if (dd < st.fire.r) warmFire = Math.max(warmFire, 1 - dd / st.fire.r) } if (st.cp && cp?.id !== st.id && Math.hypot(p.x - st.cp.x, p.z - st.cp.z) < 2.8 && Math.abs(p.y - 1.7 - st.h) < 3) { restNear = st; if (cp?.id !== st.id) cpNear = st } }
+      if (!restNear && house.rest && Math.hypot(p.x - house.rest.x, p.z - house.rest.z) < 2.8 && Math.abs(p.y - 1.7 - house.rest.y) < 2.5) { restNear = { id: 'start', cp: { x: house.spawn.x, z: house.spawn.z }, h: house.rest.y }; if (cp?.id !== 'start') cpNear = restNear } }
     { const done = ground.step(dt); if (net?.isHost) for (const id of done) { const o = ground.map.get(id); if (o) net.sendItem({ op: 'rest', id, x: o.x, y: o.y, z: o.z }) } // the host says where each thing came to rest
       const d = look(); near = player.down ? null : ground.nearest(p.x, p.y, p.z, d[0], d[1], d[2]); if (qDown && (!held() || player.down)) qDown = 0;
       const hh = qDown ? (performance.now() - qDown) / 1000 : 0; thr.style.display = hh > .25 ? 'block' : 'none'; thrFill.style.width = Math.min(1, (hh - .25) / 1.1) * 100 + '%';
-      prompt.textContent = performance.now() < toastT ? toastMsg : near ? `E \u00b7 Pick up ${ITEMS[near.type].name}` : cpNear ? 'E \u00b7 Rest here (set checkpoint)' : ''; prompt.style.display = prompt.textContent ? 'block' : 'none' }
-    hotbar(); const itemBits = (held() === 'flashlight' ? 32 | (torchOn ? 64 : 0) : 0) | (held() === 'binoculars' ? 128 | (zoomOn ? 256 : 0) : 0) | (held() === 'lantern' ? 512 | (torchOn ? 1024 : 0) : 0);
+      prompt.textContent = performance.now() < toastT ? toastMsg : near ? `E \u00b7 Pick up ${ITEMS[near.type].name}` : restNear && !sleeping && !dead ? [cpNear ? 'E \u00b7 Rest here (set checkpoint)' : othersDead().length && DEATH === 'revive' ? 'E \u00b7 Rest here (bring friends back)' : '', 'Z \u00b7 Sleep'].filter(Boolean).join('    ') : ''; prompt.style.display = prompt.textContent ? 'block' : 'none' }
+    hotbar(); syncVm(dt); const heldIdx = held() ? ITEM_KEYS.indexOf(held()) + 1 : 0, itemBits = (held() === 'flashlight' ? 32 | (torchOn ? 64 : 0) : 0) | (held() === 'binoculars' ? 128 | (zoomOn ? 256 : 0) : 0) | (held() === 'lantern' ? 512 | (torchOn ? 1024 : 0) : 0) | (useProg > 0 ? 16384 : 0);
     if (emote && (player.grab || player.reach)) emote = 0; // grabbing or reaching cancels an emote
     if (emote && !EMOTES[emote - 1]?.move && ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space'].some(c => player.keys[c])) emote = 0; // moving cancels full-body emotes
     let pull = null; // reach-out grab: a friend holding a hand out in front of you pulls you in (helpful mode: only when you're climbing, sliding or falling)
@@ -241,19 +302,19 @@ function launch(cfg, joined) {
     for (const a of avatars.values()) if ((a.flags & 2) && a.tgt) hands.push({ who: a, v: new BABYLON.Vector3(a.tgt.x + Math.sin(a.tyaw) * .85, a.tgt.y + 1.4, a.tgt.z + Math.cos(a.tyaw) * .85) });
     me.reachTo = pull ? new BABYLON.Vector3(pull.hx, pull.hy, pull.hz) : null;
     for (const a of avatars.values()) { a.reachTo = null; if ((a.flags & 8) && a.tgt) { let best = 3.5; for (const h of hands) { const d = BABYLON.Vector3.Distance(h.v, a.tgt); if (h.who !== a && d < best) { best = d; a.reachTo = h.v } } } }
-    me.setState([p.x, p.y, p.z, yaw, emote, player.flags | itemBits, player.pitch]); me.update(dt); avatars.forEach(a => a.update(dt));
+    me.setState([p.x, p.y, p.z, yaw, emote, player.flags | itemBits, player.pitch, heldIdx]); me.update(dt); avatars.forEach(a => a.update(dt));
     // The arrow points at the summit (not at a trail: there is more than one now, and which way to go is up to you)
-    $('arrow').style.transform = `rotate(${Math.atan2(terrain.pathX(-cfg.length) - p.x, -cfg.length - p.z) - yaw}rad)`; energy();
-    if (net && performance.now() - sent > 66) { sent = performance.now(); net.send([+p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2), +yaw.toFixed(3), emote, player.flags | itemBits, +player.pitch.toFixed(2)], myName) }
-    if (frame++ % 10 === 0) { // progress: how tall the mountain is, your altitude, the percentage, and where friends are
+    { const sm = terrain.summit, tx = sm ? sm.x : terrain.pathX(-cfg.length), tz = sm ? sm.z : -cfg.length; $('arrow').style.transform = `rotate(${Math.atan2(tx - p.x, tz - p.z) - yaw}rad)`; if (sm && !summitDone && frame % 5 === 0 && Math.hypot(p.x - sm.x, p.z - sm.z) < 9 && p.y - 1.7 > sm.h - 4) showSummit() } energy();
+    if (net && performance.now() - sent > 66) { sent = performance.now(); net.send([+p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2), +yaw.toFixed(3), emote, player.flags | itemBits, +player.pitch.toFixed(2), heldIdx], myName) }
+    if (frame++ % 10 === 0) { biomeNow = terrain.biome(p.x, p.z); // progress: how tall the mountain is, your altitude, the percentage, and where friends are
       const top = Math.round(terrain.peak), alt = Math.max(0, Math.round(p.y - 1.7)), pct = Math.min(100, alt / top * 100), hue = (id) => [...id].reduce((a, c) => a * 31 + c.charCodeAt(0), 7) % 360;
       let marks = ''; for (const [id, a] of avatars) if (a.tgt) marks += `<u title="${a.name || ''}" style="left:${Math.max(0, Math.min(100, a.tgt.y / top * 100))}%;background:hsl(${hue(id)} 60% 65%)"></u>`;
       const wl = weather.label(ws), tn = daytime.at(gt).night > .5, icon = { blizzard: '\u{1F328}\uFE0F', snowing: '\u2744\uFE0F', thunderstorm: '\u26C8\uFE0F', raining: '\u{1F327}\uFE0F', foggy: '\u{1F32B}\uFE0F', overcast: '\u2601\uFE0F', clear: tn ? '\u{1F319}' : '\u2600\uFE0F' }[wl];
-      hud.innerHTML = `<div class="alt"><b>${alt.toLocaleString()} m</b> <span>of ${top.toLocaleString()} m</span></div><div class="wx">${icon} ${wl[0].toUpperCase() + wl.slice(1)} · ${daytime.clock(gt)}</div><div class="bar"><i style="width:${pct}%"></i>${marks}<u class="me" style="left:${pct}%"></u></div><div class="meta">${pct.toFixed(1)}% · ${Math.max(0, top - alt).toLocaleString()} m to go · ${BIOME_NAMES[terrain.biome(p.x, p.z)]} · ${room ? `<br>${room} · ${avatars.size + 1} player(s)` : ''}</div>`;
+      hud.innerHTML = `<div class="alt"><b>${alt.toLocaleString()} m</b> <span>of ${top.toLocaleString()} m</span></div><div class="wx">${icon} ${wl[0].toUpperCase() + wl.slice(1)} · ${daytime.clock(gt)}</div><div class="bar"><i style="width:${pct}%"></i>${marks}<u class="me" style="left:${pct}%"></u></div><div class="meta">${pct.toFixed(1)}% · ${Math.max(0, top - alt).toLocaleString()} m to go · ${BIOME_NAMES[biomeNow]} · ${room ? `<br>${room} · ${avatars.size + 1} player(s)` : ''}</div>`;
     }
     scene.render();
   });
-  if (location.search.includes('debug')) window.__m = { player, terrain, chunks, scene, engine, cfg, avatars }; // for the browser test harness (tests/browser)
+  if (location.search.includes('debug')) window.__m = { fauna, player, terrain, chunks, scene, engine, cfg, avatars, me, setEmote: (n) => emote = n, vm, die: (w) => die(w || 'fell'), state: () => ({ injury, dead, sleeping, hungerV, summitDone }), give, startSleep, restNearSet: (r) => { restNear = r }, wake }; // for the browser test harness (tests/browser)
   addEventListener('resize', () => engine.resize());
 }
 

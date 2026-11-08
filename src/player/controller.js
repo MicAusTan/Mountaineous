@@ -2,6 +2,7 @@
 // Moderate slopes make you slip, steep ones slide you faster and faster unless you grab. Rocks can be climbed and stood on.
 const STEEP = 1.3, SLIP = .85, CLIMB_MIN = .6, MAX_GRAB = 3.0; // beyond MAX_GRAB the rock is too smooth and sheer to hold
 const CLIMB = 3.0, HOLD_GRAB = 5.0, GRACE = .7; // climbing speed along the surface (m/s); once you're holding on, a short bump steeper than MAX_GRAB (rough ground, a lip) doesn't throw you off
+export const RESERVE_CAP = 60; // reserve energy never drains, it only has this cap
 const RAG_MIN = 15.35; // landing faster than this (m/s; about a 6 m fall) knocks you down for a moment
 export class Controller {
   constructor(scene, canvas, terrain, start) {
@@ -10,14 +11,14 @@ export class Controller {
     this.stamina = 100; this.reserve = 0; this.noGrab = false; this.pitoned = false; this.chalk = 0; this.exhausted = false; // reserve: extra temporary energy that is only used once the normal bar is empty; noGrab: you hold an item, so left click is "use" not "grab"; pitoned: hanging at a piton (free rest); chalk: seconds of chalk left this.climbing = false; this.grab = false; this.reach = false; this.idle = 0;
     this.pitch = 0; this.zoomK = 1; this.vo = [0, 0, 0]; this.wetK = 0; this.restK = 1; // pitch: where you look; zoomK: mouse slowdown while zoomed; vo: view-only offset that eases away the snap when you grab on; wetK 0..1: rock is wet; restK: recovery speed (rain on a cool day, resting under cover)
     this.dive = 0; this.pull = null; // set each frame to a friend's outstretched hand that has hold of you
-    this.rag = 0; this.limp = false; this.ragT = 0; // rag: seconds left of a real knock-down; limp: you chose to go limp (R), until you press R again
+    this.rag = 0; this.limp = false; this.ragT = 0; this.dead = false; this.sleeping = false; this.onHurt = null; // rag: seconds left of a real knock-down; limp: you chose to go limp (R), until you press R again
      this.lie = 0; this.drop = 0; this.windV = [0, 0]; // ragdoll timer, how far down you are (0..1), how far the view is lowered, wind push (m/s) set by main.js
     this.aff = {}; // afflictions (hunger, cold, poison...) each take a share of your maximum energy
     this.cam = new BABYLON.UniversalCamera('cam', new BABYLON.Vector3(start.x, terrain.height(start.x, start.z) + 1.7, start.z), scene);
     this.cam.minZ = 0.05; this.cam.maxZ = 2000; this.cam.inputs.clear(); this.cam.rotation.y = Math.PI; scene.activeCamera = this.cam; // face the summit (-Z)
     addEventListener('keydown', e => this.keys[e.code] = true); addEventListener('keyup', e => this.keys[e.code] = false);
     const live = () => document.pointerLockElement === canvas && !this.frozen;
-    addEventListener('keydown', e => { if (e.code === 'KeyR' && !e.repeat && live() && !(this.rag > 0)) { this.limp = !this.limp; if (this.limp) this.ragT = 0 } }); // R: go limp on purpose / get back up (a real knock-down can't be cancelled)
+    addEventListener('keydown', e => { if (e.code === 'KeyR' && !e.repeat && live() && !(this.rag > 0) && !this.dead && !this.sleeping) { this.limp = !this.limp; if (this.limp) this.ragT = 0 } }); // R: go limp on purpose / get back up (a real knock-down can't be cancelled)
     addEventListener('mousedown', e => { if (!live()) return; if (e.button === 0) this.grab = true; if (e.button === 2) this.reach = true });
     addEventListener('mouseup', e => { if (e.button === 0) this.grab = false; if (e.button === 2) this.reach = false });
     addEventListener('blur', () => { this.keys = {}; this.grab = this.reach = false });
@@ -28,18 +29,19 @@ export class Controller {
     });
   }
   teleport(x, z, yaw) { // put the player back on their feet somewhere (checkpoint)
-    const g = this.t.height(x, z); this.cam.position.set(x, g + 1.7, z); if (yaw != null) this.cam.rotation.y = yaw; this.vx = this.vz = this.vy = 0; this.slide = 0; this.climbing = false; this.grab = false; this.vo = [0, 0, 0]; this.rag = 0; this.grounded = true }
+    const g = this.t.height(x, z); this.cam.position.set(x, g + 1.7, z); if (yaw != null) this.cam.rotation.y = yaw; this.vx = this.vz = this.vy = 0; this.slide = 0; this.climbing = false; this.grab = false; this.vo = [0, 0, 0]; this.rag = 0; this.limp = false; this.grounded = true }
   get viewOff() { const v = this.vo, w = this.wo || (this.wo = [0, 0]); return [v[0] + w[0], v[1], v[2] + w[1]] } // everything that only moves the view, never the body (applied while rendering)
   get reaching() { return this.reach && !this.climbing && !this.reachLock } // right click does nothing while you climb, and a right click that began mid-climb stays ignored until you let go of it // no reaching out while you're climbing; holding both hands out is fine otherwise
   get grabbing() { return this.grab && !this.noGrab } // left click held and it means "grab"
   get energy() { return this.stamina + this.reserve }
   spend(a) { const t = Math.min(this.stamina, a); this.stamina -= t; a -= t; if (a > 0) { const u = Math.min(this.reserve, a); this.reserve -= u; a -= u } return a <= 0 } // pay from the normal bar first, then the reserve
-  get flags() { return (this.climbing ? 1 : 0) | (this.reaching ? 2 : 0) | (this.grabbing && !this.climbing ? 4 : 0) | (this.pull ? 8 : 0) | (this.down ? 16 : 0) | (this.swimming ? 2048 : 0) } // for the avatar: arms up
-  get down() { return this.rag > 0 || this.limp } // knocked down for real, or lying limp by choice
+  get flags() { return (this.climbing ? 1 : 0) | (this.reaching ? 2 : 0) | (this.grabbing && !this.climbing ? 4 : 0) | (this.pull ? 8 : 0) | (this.down ? 16 : 0) | (this.swimming ? 2048 : 0) | (this.sleeping ? 4096 : 0) | (this.dead ? 8192 : 0) } // for the avatar: arms up
+  get down() { return this.rag > 0 || this.limp || this.dead || this.sleeping } // knocked down for real, or lying limp by choice
+  get lost() { return Object.values(this.aff).reduce((a, b) => a + b, 0) } // percent of the bar taken by cold, hunger, injury
   get cap() { return Math.max(10, 100 - Object.values(this.aff).reduce((a, b) => a + b, 0)) } // max energy after afflictions
   setAffliction(id, amount) { if (amount > 0) this.aff[id] = amount; else delete this.aff[id] }
   startRag(imp, gx, gz, grad, yaw) { // a hard landing: lose control for a moment and tumble on in the direction you were going or down the slope (no stamina cost: you'd just wait to get it back anyway)
-    this.rag = Math.min(4.5, 1.2 + (imp - RAG_MIN) * .2); this.ragT = 0; this.limp = false;
+    this.rag = Math.min(4.5, 1.2 + (imp - RAG_MIN) * .2); this.ragT = 0; this.limp = false; this.onHurt?.(4 + (imp - RAG_MIN) * 2.2); // a hard fall hurts: main.js turns this into an injury that takes part of your energy bar
     const hv = Math.hypot(this.vx, this.vz); this.sd = grad > .25 ? [-gx / grad, -gz / grad] : hv > .5 ? [this.vx / hv, this.vz / hv] : [Math.sin(yaw), Math.cos(yaw)];
     this.slide = Math.max(this.slide, Math.min(9, imp * .4)); this.vx *= .3; this.vz *= .3; this.climbing = false;
   }
@@ -109,7 +111,7 @@ export class Controller {
     if (wasSwim && !swimming && !this.climbing) v0[1] += Math.max(-.9, Math.min(.9, py0 - p.y)); // wading out: the view eases down to standing height
     if (this.rag > 0) this.rag = Math.max(0, this.rag - dt); if (this.down) this.ragT += dt;
     this.lie += ((this.down ? 1 : 0) - this.lie) * Math.min(1, dt * (this.down ? 9 : 2.2)); this.drop = this.lie * 1.15; this.cam.rotation.z = this.lie * (.5 + .12 * Math.sin(this.ragT * 3)); // view drops to the ground and tilts; main.js applies `drop` only while rendering
-    this.reserve = Math.max(0, this.reserve - .5 * dt); // the reserve fades if you don't need it
+    this.reserve = Math.min(RESERVE_CAP, this.reserve); // reserve only has a cap: it never drains by itself, it is just spent first
     if (this.pitoned && this.climbing) { this.stamina = Math.min(this.cap, this.stamina + 9 * dt); this.idle = 0 } // hanging from a piton: a real rest
     else if (use) { this.spend(use * dt); this.idle = 0 } else if ((this.idle += dt) > .8) this.stamina = Math.min(this.cap, this.stamina + 25 * this.restK * dt);
     { const wo = this.wo || (this.wo = [0, 0]), k = this.climbing && !gp && !ob ? Math.min(.8, .22 * Math.min(grad, 4)) : 0, a = Math.min(1, dt * 8); /* on a steep wall the eye steps back from it, so the near plane never ends up inside the rock */
